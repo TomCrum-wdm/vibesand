@@ -105,10 +105,24 @@
          </ul>
          <h4>Controls</h4>
          <ul>
-            <li><strong>Left Click:</strong> Use selected tool.</li>
-            <li><strong>Right Click + Drag:</strong> Orbit camera.</li>
-            <li><strong>Middle Mouse / Space + Left Click + Drag:</strong> Pan camera.</li>
-            <li><strong>Mouse Wheel:</strong> Zoom.</li>
+            <li><strong>Camera Modes:</strong> Switch between Orbital (default) and First Person modes in the UI panel.</li>
+            <li><strong>Orbital Mode:</strong>
+               <ul>
+                  <li><strong>Left Click:</strong> Use selected tool.</li>
+                  <li><strong>Right Click + Drag:</strong> Orbit camera.</li>
+                  <li><strong>Middle Mouse / Space + Left Click + Drag:</strong> Pan camera.</li>
+                  <li><strong>Mouse Wheel:</strong> Zoom.</li>
+               </ul>
+            </li>
+            <li><strong>First Person Mode:</strong>
+               <ul>
+                  <li><strong>WASD:</strong> Move forward/left/backward/right.</li>
+                  <li><strong>Space:</strong> Move up.</li>
+                  <li><strong>Shift:</strong> Move down.</li>
+                  <li><strong>Mouse:</strong> Look around (click to lock cursor).</li>
+                  <li><strong>Left Click:</strong> Use selected tool at crosshair.</li>
+               </ul>
+            </li>
          </ul>
          <h4 style="margin-top:1.5em;">Under the Hood</h4>
          <ul>
@@ -144,7 +158,7 @@
             </li>
             <li><strong>Destructive Events:</strong> Tools like Bombs, Blasters, and Meteors (beyond just their lighting).</li>
             <li><strong>Advanced Erosion:</strong> Rain tool carving terrain; water currents displacing sand; wind effects.</li>
-            <li><strong>First-Person Controller:</strong> For immersive exploration.</li>
+            <li><strong>✓ First-Person Controller:</strong> COMPLETE - Immersive exploration with WASD movement, mouse look, and vertical controls.</li>
             <li><strong>World Scalability:</strong> Chunking systems and sparse voxel techniques (e.g., Brickmaps).</li>
             <li>Further refinement of particle interactions and fluid dynamics.</li>
             <li>Staggered CPU Readback for Voxel Type Counts (e.g., 50k Stone, 1M Water, 500k Sand).</li>
