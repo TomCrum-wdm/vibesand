@@ -33,6 +33,10 @@
          #info input[type="range"] { width: 100px; vertical-align: middle; margin-left: 5px;}
          #info input[type="checkbox"] { vertical-align: middle; margin-right: 5px;}
          #instructions { position: fixed; bottom: 10px; left: 10px; right: 10px; text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 0.9em; z-index: 40;}
+         #firstPersonHUD { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; pointer-events: none; z-index: 60; }
+         #firstPersonHUD::before, #firstPersonHUD::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.8); }
+         #firstPersonHUD::before { width: 2px; height: 20px; left: 9px; top: 0; }
+         #firstPersonHUD::after { width: 20px; height: 2px; left: 0; top: 9px; }
          .info-toggle-button {
          position: fixed; top: var(--base-padding); left: var(--base-padding);
          background-color: rgba(50, 50, 55, 0.8); color: var(--text-color-light);
@@ -101,10 +105,24 @@
          </ul>
          <h4>Controls</h4>
          <ul>
-            <li><strong>Left Click:</strong> Use selected tool.</li>
-            <li><strong>Right Click + Drag:</strong> Orbit camera.</li>
-            <li><strong>Middle Mouse / Space + Left Click + Drag:</strong> Pan camera.</li>
-            <li><strong>Mouse Wheel:</strong> Zoom.</li>
+            <li><strong>Camera Modes:</strong> Switch between Orbital (default) and First Person modes in the UI panel.</li>
+            <li><strong>Orbital Mode:</strong>
+               <ul>
+                  <li><strong>Left Click:</strong> Use selected tool.</li>
+                  <li><strong>Right Click + Drag:</strong> Orbit camera.</li>
+                  <li><strong>Middle Mouse / Space + Left Click + Drag:</strong> Pan camera.</li>
+                  <li><strong>Mouse Wheel:</strong> Zoom.</li>
+               </ul>
+            </li>
+            <li><strong>First Person Mode:</strong>
+               <ul>
+                  <li><strong>WASD:</strong> Move forward/left/backward/right.</li>
+                  <li><strong>Space:</strong> Move up.</li>
+                  <li><strong>Shift:</strong> Move down.</li>
+                  <li><strong>Mouse:</strong> Look around (click to lock cursor).</li>
+                  <li><strong>Left Click:</strong> Use selected tool at crosshair.</li>
+               </ul>
+            </li>
          </ul>
          <h4 style="margin-top:1.5em;">Under the Hood</h4>
          <ul>
@@ -140,7 +158,7 @@
             </li>
             <li><strong>Destructive Events:</strong> Tools like Bombs, Blasters, and Meteors (beyond just their lighting).</li>
             <li><strong>Advanced Erosion:</strong> Rain tool carving terrain; water currents displacing sand; wind effects.</li>
-            <li><strong>First-Person Controller:</strong> For immersive exploration.</li>
+            <li><strong>✓ First-Person Controller:</strong> COMPLETE - Immersive exploration with WASD movement, mouse look, and vertical controls.</li>
             <li><strong>World Scalability:</strong> Chunking systems and sparse voxel techniques (e.g., Brickmaps).</li>
             <li>Further refinement of particle interactions and fluid dynamics.</li>
             <li>Staggered CPU Readback for Voxel Type Counts (e.g., 50k Stone, 1M Water, 500k Sand).</li>
@@ -195,11 +213,17 @@
          </div>
          <div><label><input type="checkbox" id="continuousPaintToggle" checked>Continuous Paint</label></div>
          <div><label><input type="checkbox" id="targetFarFaceToggle" checked>Target Far Face (on air)</label></div>
+         <div class="tool-buttons" style="margin-top: 10px;">
+            Camera Mode:
+            <button id="cameraModeOrbital" class="active">Orbital</button>
+            <button id="cameraModeFirstPerson">First Person</button>
+         </div>
       </div>
+      <div id="firstPersonHUD" style="display: none;"></div>
       <div id="canvas-container">
          <canvas id="webgpu-canvas"></canvas>
       </div>
-      <div id="instructions">DDA Voxel Renderer. Right-click to orbit, Middle-mouse/Space+Left-click to pan.</div>
+      <div id="instructions">DDA Voxel Renderer. <span id="orbitalInstructions">Right-click to orbit, Middle-mouse/Space+Left-click to pan.</span><span id="firstPersonInstructions" style="display:none;">WASD to move, Space/Shift for up/down, Mouse to look. Click to lock cursor.</span></div>
       <script type="module">
          // --- Start of UI elements that can be initialized without WebGPU ---
          const infoToggleButtonElement = document.getElementById('infoToggleButton'); // Renamed to avoid conflict
@@ -326,6 +350,21 @@
              let isPreviewVisible = true;
              let currentCamX=0, currentCamY=0, currentCamZ=0;
              let currentForward=[0,0,1], currentRight=[1,0,0], currentUp=[0,1,0];
+             let cameraMode = 'orbital'; // 'orbital' or 'firstperson'
+             let firstPersonCamera = {
+                position: [VOXEL_GRID_SIZE / 2, 35, VOXEL_GRID_SIZE / 2],
+                yaw: -Math.PI / 2, // Looking towards +X initially
+                pitch: 0,
+                velocity: [0, 0, 0],
+                speed: 20.0,
+                jumpVelocity: 8.0,
+                gravity: -20.0,
+                isGrounded: false,
+                height: 1.8,
+             };
+             let keyState = {
+                w: false, a: false, s: false, d: false, space: false, shift: false,
+             };
 
              const commonShaderCode = `
                  struct VoxelData {
@@ -995,6 +1034,29 @@
              document.getElementById('targetFarFaceToggle').addEventListener('change', (e) => { uiControls.targetFarFaceOnAirHit = e.target.checked; });
              document.getElementById('resolutionScale').addEventListener('change', resizeCanvasAndContext);
 
+             // Camera mode switching
+             document.getElementById('cameraModeOrbital').addEventListener('click', () => {
+                cameraMode = 'orbital';
+                document.getElementById('cameraModeOrbital').classList.add('active');
+                document.getElementById('cameraModeFirstPerson').classList.remove('active');
+                document.getElementById('firstPersonHUD').style.display = 'none';
+                document.getElementById('orbitalInstructions').style.display = 'inline';
+                document.getElementById('firstPersonInstructions').style.display = 'none';
+                canvas.style.cursor = 'crosshair';
+                if (document.pointerLockElement === canvas) {
+                   document.exitPointerLock();
+                }
+             });
+             document.getElementById('cameraModeFirstPerson').addEventListener('click', () => {
+                cameraMode = 'firstperson';
+                document.getElementById('cameraModeFirstPerson').classList.add('active');
+                document.getElementById('cameraModeOrbital').classList.remove('active');
+                document.getElementById('firstPersonHUD').style.display = 'block';
+                document.getElementById('orbitalInstructions').style.display = 'none';
+                document.getElementById('firstPersonInstructions').style.display = 'inline';
+                canvas.style.cursor = 'none';
+             });
+
              // Use the specific element references from the top for these two
              const localInfoToggleButton = document.getElementById('infoToggleButton'); // This one is already setup at the top
              const localDescriptionArea = document.getElementById('descriptionArea'); // This one is already setup at the top
@@ -1005,19 +1067,55 @@
              canvas.addEventListener('contextmenu', e => {e.preventDefault(); hideInfoPanel(); });
              canvas.addEventListener('mouseenter', () => isPreviewVisible = true);
              canvas.addEventListener('mouseleave', () => isPreviewVisible = false);
-             window.addEventListener('keydown', (e) => { if (e.code === 'Space') spacebarDown = true; });
-             window.addEventListener('keyup', (e) => { if (e.code === 'Space') { spacebarDown = false; if (mouseState.isPanning && mouseState.buttons[0]) mouseState.isPanning = false; }});
+             
+             // Keyboard controls
+             window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') spacebarDown = true;
+                if (cameraMode === 'firstperson') {
+                   if (e.code === 'KeyW') keyState.w = true;
+                   if (e.code === 'KeyA') keyState.a = true;
+                   if (e.code === 'KeyS') keyState.s = true;
+                   if (e.code === 'KeyD') keyState.d = true;
+                   if (e.code === 'Space') { keyState.space = true; e.preventDefault(); }
+                   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = true;
+                }
+             });
+             window.addEventListener('keyup', (e) => {
+                if (e.code === 'Space') { spacebarDown = false; if (mouseState.isPanning && mouseState.buttons[0]) mouseState.isPanning = false; }
+                if (cameraMode === 'firstperson') {
+                   if (e.code === 'KeyW') keyState.w = false;
+                   if (e.code === 'KeyA') keyState.a = false;
+                   if (e.code === 'KeyS') keyState.s = false;
+                   if (e.code === 'KeyD') keyState.d = false;
+                   if (e.code === 'Space') keyState.space = false;
+                   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = false;
+                }
+             });
              canvas.addEventListener('mousedown', (e) => {
                  hideInfoPanel();
                  mouseState.buttons[e.button] = true;
                  mouseState.lastX = e.clientX; mouseState.lastY = e.clientY;
-                 if (e.button === 0 && !spacebarDown) {
+                 
+                 // In first-person mode, request pointer lock on click
+                 if (cameraMode === 'firstperson' && document.pointerLockElement !== canvas) {
+                    canvas.requestPointerLock();
+                 }
+                 
+                 if (e.button === 0 && !spacebarDown && cameraMode === 'orbital') {
                      if (uiControls.continuousPaint) mouseState.isPainting = true;
                      else if (!mouseState.hasFiredSingleShot) { mouseState.isPainting = true; mouseState.hasFiredSingleShot = true; }
                      else { mouseState.isPainting = false; }
                  }
-                 mouseState.isOrbiting = (e.button === 2);
-                 mouseState.isPanning = (e.button === 1 || (spacebarDown && e.button === 0));
+                 
+                 // Paint in first-person mode
+                 if (e.button === 0 && cameraMode === 'firstperson') {
+                     if (uiControls.continuousPaint) mouseState.isPainting = true;
+                     else if (!mouseState.hasFiredSingleShot) { mouseState.isPainting = true; mouseState.hasFiredSingleShot = true; }
+                     else { mouseState.isPainting = false; }
+                 }
+                 
+                 mouseState.isOrbiting = (e.button === 2 && cameraMode === 'orbital');
+                 mouseState.isPanning = (cameraMode === 'orbital' && (e.button === 1 || (spacebarDown && e.button === 0)));
              });
              window.addEventListener('mouseup', (e) => {
                  mouseState.buttons[e.button] = false;
@@ -1026,19 +1124,33 @@
                  mouseState.isPanning = false;
              });
              window.addEventListener('mousemove', (e) => {
-                 const dx = e.clientX - mouseState.lastX; const dy = e.clientY - mouseState.lastY;
-                 const rect = canvas.getBoundingClientRect();
-                 mouseState.x = (e.clientX - rect.left); mouseState.y = (e.clientY - rect.top);
-                 if (mouseState.isOrbiting) {
-                     camera.alpha -= dx * 0.005;
-                     camera.beta = Math.max(-1.56, Math.min(1.56, camera.beta + dy * 0.005));
+                 if (cameraMode === 'firstperson' && document.pointerLockElement === canvas) {
+                    // First-person mouse look
+                    const sensitivity = 0.002;
+                    firstPersonCamera.yaw -= e.movementX * sensitivity;
+                    firstPersonCamera.pitch -= e.movementY * sensitivity;
+                    firstPersonCamera.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, firstPersonCamera.pitch));
+                 } else if (cameraMode === 'orbital') {
+                    const dx = e.clientX - mouseState.lastX; const dy = e.clientY - mouseState.lastY;
+                    const rect = canvas.getBoundingClientRect();
+                    mouseState.x = (e.clientX - rect.left); mouseState.y = (e.clientY - rect.top);
+                    if (mouseState.isOrbiting) {
+                        camera.alpha -= dx * 0.005;
+                        camera.beta = Math.max(-1.56, Math.min(1.56, camera.beta + dy * 0.005));
+                    }
+                    else if (mouseState.isPanning) {
+                        camera.target[0] -= (currentRight[0]*dx - currentUp[0]*dy) * PAN_SENSITIVITY;
+                        camera.target[1] -= (currentRight[1]*dx - currentUp[1]*dy) * PAN_SENSITIVITY;
+                        camera.target[2] -= (currentRight[2]*dx - currentUp[2]*dy) * PAN_SENSITIVITY;
+                    }
+                    mouseState.lastX = e.clientX; mouseState.lastY = e.clientY;
                  }
-                 else if (mouseState.isPanning) {
-                     camera.target[0] -= (currentRight[0]*dx - currentUp[0]*dy) * PAN_SENSITIVITY;
-                     camera.target[1] -= (currentRight[1]*dx - currentUp[1]*dy) * PAN_SENSITIVITY;
-                     camera.target[2] -= (currentRight[2]*dx - currentUp[2]*dy) * PAN_SENSITIVITY;
+                 
+                 // Always update mouse position for cursor tracking (when not in pointer lock)
+                 if (document.pointerLockElement !== canvas) {
+                    const rect = canvas.getBoundingClientRect();
+                    mouseState.x = (e.clientX - rect.left); mouseState.y = (e.clientY - rect.top);
                  }
-                 mouseState.lastX = e.clientX; mouseState.lastY = e.clientY;
              });
              canvas.addEventListener('wheel', (e) => { e.preventDefault(); camera.radius=Math.max(10, Math.min(VOXEL_GRID_SIZE*5, camera.radius+e.deltaY*0.1)); }, {passive: false});
 
@@ -1052,32 +1164,141 @@
              }
              resizeCanvasAndContext();
 
+             // Helper function to check if a voxel is solid
+             async function isVoxelSolid(x, y, z) {
+                if (x < 0 || y < 0 || z < 0 || x >= VOXEL_GRID_SIZE || y >= VOXEL_GRID_SIZE || z >= VOXEL_GRID_SIZE) {
+                   return true; // Out of bounds is solid
+                }
+                const idx = Math.floor(x) + Math.floor(y) * VOXEL_GRID_SIZE + Math.floor(z) * VOXEL_GRID_SIZE * VOXEL_GRID_SIZE;
+                // We can't easily read from GPU buffer in real-time, so we'll use approximate collision
+                // For simplicity, assume y < 32 is solid (terrain level)
+                return y < 32;
+             }
+
+             // Update first-person camera physics
+             function updateFirstPersonCamera(deltaTime) {
+                if (cameraMode !== 'firstperson') return;
+                
+                // Calculate movement direction
+                const forward = [
+                   Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
+                   Math.sin(firstPersonCamera.pitch),
+                   Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
+                ];
+                const right = [
+                   Math.sin(firstPersonCamera.yaw),
+                   0,
+                   -Math.cos(firstPersonCamera.yaw)
+                ];
+                
+                // Calculate horizontal movement (ignoring pitch for walking)
+                const forwardH = [Math.cos(firstPersonCamera.yaw), 0, Math.sin(firstPersonCamera.yaw)];
+                
+                let moveX = 0, moveZ = 0;
+                if (keyState.w) { moveX += forwardH[0]; moveZ += forwardH[2]; }
+                if (keyState.s) { moveX -= forwardH[0]; moveZ -= forwardH[2]; }
+                if (keyState.a) { moveX -= right[0]; moveZ -= right[2]; }
+                if (keyState.d) { moveX += right[0]; moveZ += right[2]; }
+                
+                // Normalize movement
+                const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+                if (moveLen > 0) {
+                   moveX /= moveLen;
+                   moveZ /= moveLen;
+                }
+                
+                // Apply movement
+                const speed = firstPersonCamera.speed;
+                let newX = firstPersonCamera.position[0] + moveX * speed * deltaTime;
+                let newZ = firstPersonCamera.position[2] + moveZ * speed * deltaTime;
+                
+                // Simple collision: check if new position is in bounds
+                newX = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newX));
+                newZ = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newZ));
+                
+                firstPersonCamera.position[0] = newX;
+                firstPersonCamera.position[2] = newZ;
+                
+                // Vertical movement (simple: space goes up, shift goes down)
+                if (keyState.space) {
+                   firstPersonCamera.position[1] += speed * deltaTime;
+                }
+                if (keyState.shift) {
+                   firstPersonCamera.position[1] -= speed * deltaTime;
+                }
+                
+                // Keep within bounds
+                firstPersonCamera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, firstPersonCamera.position[1]));
+             }
+
              let lastFrameTime = performance.now();
              async function frame() {
-                 currentCamX = camera.target[0] + camera.radius * Math.cos(camera.beta) * Math.sin(camera.alpha);
-                 currentCamY = camera.target[1] + camera.radius * Math.sin(camera.beta);
-                 currentCamZ = camera.target[2] + camera.radius * Math.cos(camera.beta) * Math.cos(camera.alpha);
+                 const now = performance.now();
+                 const deltaTime = (now - lastFrameTime) / 1000.0;
+                 
+                 // Update first-person camera if in that mode
+                 updateFirstPersonCamera(deltaTime);
+                 
+                 // Calculate camera position and orientation based on mode
+                 if (cameraMode === 'firstperson') {
+                    currentCamX = firstPersonCamera.position[0];
+                    currentCamY = firstPersonCamera.position[1];
+                    currentCamZ = firstPersonCamera.position[2];
+                    
+                    // Calculate view direction from yaw and pitch
+                    currentForward = [
+                       Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
+                       Math.sin(firstPersonCamera.pitch),
+                       Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
+                    ];
+                    
+                    const wUp = [0, 1, 0];
+                    currentRight = [
+                       Math.sin(firstPersonCamera.yaw),
+                       0,
+                       -Math.cos(firstPersonCamera.yaw)
+                    ];
+                    
+                    currentUp = [
+                       currentRight[1] * currentForward[2] - currentRight[2] * currentForward[1],
+                       currentRight[2] * currentForward[0] - currentRight[0] * currentForward[2],
+                       currentRight[0] * currentForward[1] - currentRight[1] * currentForward[0]
+                    ];
+                    let up_n_raw = Math.hypot(...currentUp);
+                    let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
+                    currentUp = [currentUp[0]/up_n_val, currentUp[1]/up_n_val, currentUp[2]/up_n_val];
+                    
+                 } else {
+                    // Orbital camera mode
+                    currentCamX = camera.target[0] + camera.radius * Math.cos(camera.beta) * Math.sin(camera.alpha);
+                    currentCamY = camera.target[1] + camera.radius * Math.sin(camera.beta);
+                    currentCamZ = camera.target[2] + camera.radius * Math.cos(camera.beta) * Math.cos(camera.alpha);
 
-                 const fwd_un = [camera.target[0]-currentCamX, camera.target[1]-currentCamY, camera.target[2]-currentCamZ];
-                 let fwd_n_raw = Math.hypot(...fwd_un);
-                 let fwd_n_val = fwd_n_raw === 0 ? 1.0 : fwd_n_raw;
-                 currentForward = [fwd_un[0]/fwd_n_val, fwd_un[1]/fwd_n_val, fwd_un[2]/fwd_n_val];
+                    const fwd_un = [camera.target[0]-currentCamX, camera.target[1]-currentCamY, camera.target[2]-currentCamZ];
+                    let fwd_n_raw = Math.hypot(...fwd_un);
+                    let fwd_n_val = fwd_n_raw === 0 ? 1.0 : fwd_n_raw;
+                    currentForward = [fwd_un[0]/fwd_n_val, fwd_un[1]/fwd_n_val, fwd_un[2]/fwd_n_val];
 
-                 const wUp = [0,1,0];
-                 currentRight = [currentForward[1]*wUp[2]-currentForward[2]*wUp[1], currentForward[2]*wUp[0]-currentForward[0]*wUp[2], currentForward[0]*wUp[1]-currentForward[1]*wUp[0]];
-                 let r_n_raw = Math.hypot(...currentRight);
-                 let r_n_val = r_n_raw === 0 ? 1.0 : r_n_raw;
-                 currentRight = [currentRight[0]/r_n_val, currentRight[1]/r_n_val, currentRight[2]/r_n_val];
+                    const wUp = [0,1,0];
+                    currentRight = [currentForward[1]*wUp[2]-currentForward[2]*wUp[1], currentForward[2]*wUp[0]-currentForward[0]*wUp[2], currentForward[0]*wUp[1]-currentForward[1]*wUp[0]];
+                    let r_n_raw = Math.hypot(...currentRight);
+                    let r_n_val = r_n_raw === 0 ? 1.0 : r_n_raw;
+                    currentRight = [currentRight[0]/r_n_val, currentRight[1]/r_n_val, currentRight[2]/r_n_val];
 
-                 currentUp = [currentRight[1]*currentForward[2]-currentRight[2]*currentForward[1], currentRight[2]*currentForward[0]-currentRight[0]*currentForward[2], currentRight[0]*currentForward[1]-currentRight[1]*currentForward[0]];
-                 let up_n_raw = Math.hypot(...currentUp);
-                 let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
-                 currentUp = [currentUp[0]/up_n_val, currentUp[1]/up_n_val, currentUp[2]/up_n_val];
+                    currentUp = [currentRight[1]*currentForward[2]-currentRight[2]*currentForward[1], currentRight[2]*currentForward[0]-currentRight[0]*currentForward[2], currentRight[0]*currentForward[1]-currentRight[1]*currentForward[0]];
+                    let up_n_raw = Math.hypot(...currentUp);
+                    let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
+                    currentUp = [currentUp[0]/up_n_val, currentUp[1]/up_n_val, currentUp[2]/up_n_val];
+                 }
 
                  sunAngle += uiControls.sunSpeed * 0.2;
                  const sunDirection = [Math.cos(sunAngle), 0.707, Math.sin(sunAngle)];
-                 const now = performance.now();
-                 const deltaTime = (now - lastFrameTime) / 1000.0;
+                 
+                 // Calculate camera target position (point we're looking at)
+                 const cameraTarget = cameraMode === 'firstperson' 
+                    ? [currentCamX + currentForward[0], currentCamY + currentForward[1], currentCamZ + currentForward[2]]
+                    : camera.target;
+                 
                  const lightData = new Float32Array(8 * NUM_LIGHTS);
                  for(let i = 0; i < NUM_LIGHTS; i++) {
                      lights[i].position[1] += lights[i].velocity * deltaTime;
@@ -1096,18 +1317,19 @@
                  const renderUBO = new Float32Array(renderPassUniformsBuffer.size/4);
                  const renderUBOInt = new Uint32Array(renderUBO.buffer);
                  renderUBO.set([currentCamX,currentCamY,currentCamZ], 0); renderUBO.set([2.0], 3); renderUBO.set(currentRight, 4); renderUBO.set(currentUp, 8);
-                 renderUBO.set(camera.target, 12); renderUBO.set(sunDirection, 16); renderUBO.set([canvas.width,canvas.height], 20);
+                 renderUBO.set(cameraTarget, 12); renderUBO.set(sunDirection, 16); renderUBO.set([canvas.width,canvas.height], 20);
                  renderUBOInt[22] = uiControls.maxRaySteps;
                  device.queue.writeBuffer(renderPassUniformsBuffer, 0, renderUBO);
 
                  const computeUBO = new Float32Array(computePassUniformsBuffer.size/4);
                  const computeUBOInt = new Uint32Array(computeUBO.buffer);
                  computeUBO.set([currentCamX,currentCamY,currentCamZ], 0); computeUBO.set([2.0], 3); computeUBO.set(currentRight, 4); computeUBO.set(currentUp, 8);
-                 computeUBO.set(camera.target, 12);
-                 const mx = mouseState.x * (canvas.width / canvas.clientWidth);
-                 const my = mouseState.y * (canvas.height / canvas.clientHeight);
+                 computeUBO.set(cameraTarget, 12);
+                 // In first-person mode, always target center of screen
+                 const mx = cameraMode === 'firstperson' ? canvas.width / 2 : mouseState.x * (canvas.width / canvas.clientWidth);
+                 const my = cameraMode === 'firstperson' ? canvas.height / 2 : mouseState.y * (canvas.height / canvas.clientHeight);
                  computeUBO.set([mx, my], 16); computeUBO.set([canvas.width, canvas.height], 18); computeUBO.set([uiControls.brushSize], 20);
-                 let paintingGPU = (mouseState.buttons[0] && !spacebarDown) && (uiControls.continuousPaint || mouseState.isPainting);
+                 let paintingGPU = (mouseState.buttons[0] && (cameraMode === 'firstperson' || !spacebarDown)) && (uiControls.continuousPaint || mouseState.isPainting);
                  computeUBOInt[21] = paintingGPU ? 1:0;
                  computeUBOInt[22] = currentTool; computeUBOInt[23] = isPreviewVisible ? 1:0;
                  computeUBOInt[24] = uiControls.targetFarFaceOnAirHit ? 1:0;
