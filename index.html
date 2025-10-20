@@ -1260,9 +1260,9 @@
                     ];
                     
                     currentUp = [
-                       currentRight[1] * currentForward[2] - currentRight[2] * currentForward[1],
-                       currentRight[2] * currentForward[0] - currentRight[0] * currentForward[2],
-                       currentRight[0] * currentForward[1] - currentRight[1] * currentForward[0]
+                       currentForward[1] * currentRight[2] - currentForward[2] * currentRight[1],
+                       currentForward[2] * currentRight[0] - currentForward[0] * currentRight[2],
+                       currentForward[0] * currentRight[1] - currentForward[1] * currentRight[0]
                     ];
                     let up_n_raw = Math.hypot(...currentUp);
                     let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
