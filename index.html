@@ -1127,7 +1127,7 @@
                  if (cameraMode === 'firstperson' && document.pointerLockElement === canvas) {
                     // First-person mouse look
                     const sensitivity = 0.002;
-                    firstPersonCamera.yaw -= e.movementX * sensitivity;
+                    firstPersonCamera.yaw += e.movementX * sensitivity;
                     firstPersonCamera.pitch -= e.movementY * sensitivity;
                     firstPersonCamera.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, firstPersonCamera.pitch));
                  } else if (cameraMode === 'orbital') {
