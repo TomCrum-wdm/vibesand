@@ -686,6 +686,255 @@
          <span id="firstPersonInstructions" style="display:none;">WASD to move • Space/Shift for up/down • Mouse to look • Click to lock cursor</span>
       </div>
       <script type="module">
+         // ==================================================
+         // 📚 可调参数文档 | Adjustable Parameters Documentation
+         // ==================================================
+         /*
+         
+         ⚙️ 核心参数 | Core Parameters
+         ================================
+         
+         1. VOXEL_GRID_SIZE (体素网格大小)
+            位置: 第769行附近
+            当前值: 128
+            范围: 32, 64, 128, 256 (必须是2的幂次方)
+            效果: 
+            - 更大 → 更多细节，更大的世界，但性能显著降低
+            - 更小 → 更好的性能，但世界更小，细节更少
+            注意: 修改后需要重新生成世界
+         
+         2. NUM_LIGHTS (光源数量)
+            位置: 第786行附近
+            当前值: 32
+            范围: 8-64
+            效果:
+            - 更多 → 更丰富的照明效果，但降低性能
+            - 更少 → 提高性能，但照明效果较少
+            建议: 16-32之间平衡性能和视觉效果
+         
+         3. PAN_SENSITIVITY (相机平移灵敏度)
+            位置: 第782行附近
+            当前值: 0.1
+            范围: 0.05-0.5
+            效果:
+            - 更大 → 鼠标拖动时相机移动更快
+            - 更小 → 相机移动更慢，更精确控制
+         
+         
+         💡 光源参数 | Light Parameters
+         ================================
+         
+         4. lights[i].radius (光源半径)
+            位置: 第798行附近
+            当前值: 20.0 + Math.random() * 15 (20-35)
+            范围: 10-50
+            效果:
+            - 更大 → 光照覆盖更大的区域
+            - 更小 → 光照更集中
+            示例修改: radius: 30.0 (固定半径30)
+         
+         5. lights[i].velocity (光源下落速度)
+            位置: 第800行附近
+            当前值: -20.0 - Math.random() * 20.0 (-20到-40)
+            范围: -60 到 -5
+            效果:
+            - 更负 → 光源下落更快
+            - 接近0 → 光源下落更慢或悬浮
+            示例修改: velocity: -10.0 (慢速下落)
+         
+         6. lights[i].color (光源颜色)
+            位置: 第795行附近
+            当前: HSVtoRGB(Math.random(), 0.9, 1.0) (随机彩色)
+            效果:
+            - HSVtoRGB(0, 0.9, 1.0) → 纯红色光源
+            - HSVtoRGB(0.33, 0.9, 1.0) → 纯绿色光源
+            - HSVtoRGB(0.66, 0.9, 1.0) → 纯蓝色光源
+            - HSVtoRGB(0, 0, 1.0) → 白色光源
+            示例: 所有光源都是暖黄色
+            color: HSVtoRGB(0.15, 0.8, 1.0)
+         
+         
+         ☀️ 环境参数 | Environment Parameters
+         ================================
+         
+         7. sunSpeed (太阳旋转速度)
+            位置: UI控制，第812行附近
+            当前值: 0.02
+            范围: 0-0.05
+            效果:
+            - 更大 → 日夜循环更快
+            - 0 → 太阳静止不动
+            - 负值 → 太阳反向旋转
+         
+         8. sunAngle (初始太阳角度)
+            位置: 第801行附近
+            当前值: Math.PI / 4
+            范围: 0 到 2*Math.PI
+            效果:
+            - 0 → 太阳在东方
+            - Math.PI/2 → 太阳在南方
+            - Math.PI → 太阳在西方
+            - 3*Math.PI/2 → 太阳在北方
+         
+         
+         🎨 渲染参数 | Rendering Parameters
+         ================================
+         
+         9. maxRaySteps (最大光线追踪步数)
+            位置: UI控制，第833行附近
+            当前值: 384
+            范围: 64-512
+            效果:
+            - 更多 → 可以看得更远，但性能降低
+            - 更少 → 提高性能，但远处物体可能消失
+            建议: 低端GPU使用128，高端GPU使用384
+         
+         10. resolutionScale (渲染分辨率缩放)
+             位置: UI控制，第824行附近
+             当前值: 1.0 (100%)
+             范围: 0.25-1.0 (25%-100%)
+             效果:
+             - 1.0 → 原生分辨率，最佳画质
+             - 0.5 → 50%分辨率，性能提升4倍
+             - 0.25 → 25%分辨率，性能提升16倍
+             注意: 降低分辨率会使画面模糊
+         
+         11. clearValue (背景颜色)
+             位置: 第1934行附近
+             当前值: [0.1, 0.1, 0.2, 1.0] (深蓝色)
+             格式: [红, 绿, 蓝, 透明度] (0-1范围)
+             效果示例:
+             - [0, 0, 0, 1] → 黑色背景
+             - [1, 1, 1, 1] → 白色背景
+             - [0.5, 0, 0, 1] → 深红色背景
+         
+         
+         ⚡ 物理参数 | Physics Parameters
+         ================================
+         
+         12. simSteps (每帧模拟步数)
+             位置: UI控制，第830行附近
+             当前值: 1
+             范围: 0-25
+             效果:
+             - 0 → 暂停物理模拟
+             - 1 → 正常速度
+             - 5+ → 快速物理模拟
+             注意: 更多步数会降低帧率
+         
+         13. brushSize (画笔大小)
+             位置: UI控制，第815行附近
+             当前值: 10.5
+             范围: 1-25
+             效果:
+             - 更大 → 绘制更大的区域
+             - 更小 → 更精细的绘制
+         
+         
+         📷 相机参数 | Camera Parameters
+         ================================
+         
+         14. camera.radius (轨道相机距离)
+             位置: 第835行附近
+             当前值: VOXEL_GRID_SIZE * 1.8
+             范围: 50-500
+             效果:
+             - 更大 → 相机离场景更远
+             - 更小 → 相机离场景更近
+         
+         15. camera.target (相机目标点)
+             位置: 第838行附近
+             当前值: [VOXEL_GRID_SIZE/2, 30, VOXEL_GRID_SIZE/2]
+             效果: 相机围绕这个点旋转
+             示例: [64, 50, 64] (更高的观察点)
+         
+         16. firstPersonCamera.speed (第一人称移动速度)
+             位置: 第823行附近
+             当前值: 20.0
+             范围: 5.0-50.0
+             效果:
+             - 更大 → 移动更快
+             - 更小 → 移动更慢，更精确控制
+         
+         
+         🎨 视觉效果参数 | Visual Effect Parameters
+         =========================================
+         
+         17. 水的颜色 (Water Color)
+             位置: renderShaderCode第1279行附近
+             当前值: vec3(0.15, 0.45, 0.85) (蓝色)
+             效果:
+             - vec3(0.1, 0.8, 0.8) → 青色水
+             - vec3(0.2, 0.2, 0.9) → 深蓝色水
+             - vec3(0.5, 0.1, 0.6) → 紫色水(幻想效果)
+         
+         18. 沙子颜色 (Sand Color)
+             位置: renderShaderCode第1277行附近
+             当前值: vec3(0.8, 0.7, 0.4) (黄色)
+             效果:
+             - vec3(1.0, 0.9, 0.6) → 亮黄色沙子
+             - vec3(0.6, 0.4, 0.2) → 棕色沙子
+             - vec3(0.9, 0.3, 0.3) → 红色沙子(火星效果)
+         
+         19. 石头颜色 (Stone Color)
+             位置: renderShaderCode第1275行附近
+             当前值: vec3(0.45) (灰色)
+             效果:
+             - vec3(0.3) → 更深的灰色
+             - vec3(0.6) → 更浅的灰色
+             - vec3(0.4, 0.5, 0.4) → 绿灰色(苔藓石头)
+         
+         
+         ⚙️ 高级效果参数 | Advanced Effect Parameters
+         =============================================
+         
+         20. 云层密度 (Cloud Density)
+             位置: renderShaderCode第1372行附近
+             当前: smoothstep(0.4, 0.7, cloud_density)
+             效果:
+             - smoothstep(0.3, 0.6, ...) → 更多云
+             - smoothstep(0.5, 0.8, ...) → 更少云
+         
+         21. 云层速度 (Cloud Speed)
+             位置: renderShaderCode第1363行附近
+             当前: time * 0.02 和 time * 0.05
+             效果:
+             - 增加系数 → 云移动更快
+             - 减少系数 → 云移动更慢
+         
+         22. 太阳大小和强度 (Sun Size and Intensity)
+             位置: renderShaderCode第1353-1356行附近
+             当前: pow(..., 128.0) (主盘), pow(..., 8.0) (光晕)
+             效果:
+             - 增加指数 → 太阳更小更亮
+             - 减少指数 → 太阳更大更柔和
+         
+         
+         💡 实用建议 | Practical Tips
+         ============================
+         
+         性能优化组合 (Performance Optimization):
+         - VOXEL_GRID_SIZE: 64
+         - NUM_LIGHTS: 16
+         - maxRaySteps: 128
+         - resolutionScale: 0.5
+         - simSteps: 1
+         
+         视觉质量组合 (Visual Quality):
+         - VOXEL_GRID_SIZE: 128
+         - NUM_LIGHTS: 32
+         - maxRaySteps: 384
+         - resolutionScale: 1.0
+         - simSteps: 2
+         
+         创意实验组合 (Creative Experiments):
+         1. 彩虹雨效果: 保持light color随机，增加NUM_LIGHTS到48
+         2. 月光效果: sunSpeed: 0, 所有lights为蓝白色
+         3. 火星场景: 沙子改为红色，天空改为红褐色
+         4. 水下世界: 水改为绿色，增加水的亮度参数
+         
+         */
+         
          // --- Start of UI elements that can be initialized without WebGPU ---
          const infoToggleButtonElement = document.getElementById('infoToggleButton');
          const descriptionAreaElement = document.getElementById('descriptionArea');
@@ -723,18 +972,28 @@
          }
          // --- End of non-WebGPU UI ---
 
+         // ==================================================
+         // WebGPU 初始化和主函数 | WebGPU Initialization and Main Function
+         // ==================================================
          async function initAndRun() {
+             // 步骤1: 获取HTML画布元素 | Step 1: Get the HTML canvas element
+             // 画布是我们绘制3D图形的地方 | The canvas is where we'll draw our 3D graphics
              const canvas = document.getElementById('webgpu-canvas');
              if (!canvas) {
                  displayErrorAndStop("Initialization Error", "The canvas element (#webgpu-canvas) was not found in the HTML. The page structure might be broken.");
                  return; // Will not be reached
              }
 
+             // 步骤2: 检查浏览器是否支持WebGPU | Step 2: Check if browser supports WebGPU
+             // navigator.gpu 是浏览器提供的WebGPU API入口 | navigator.gpu is the browser's WebGPU API entry point
              if (!navigator.gpu) {
                  displayErrorAndStop("WebGPU Not Supported", "Your browser does not support WebGPU, or it is disabled. VibeSand requires WebGPU to run.");
                  return;
              }
 
+             // 步骤3: 请求GPU适配器 (Adapter) | Step 3: Request GPU Adapter
+             // Adapter代表系统中的一个物理GPU | Adapter represents a physical GPU in the system
+             // 在有多个GPU的系统中，浏览器会选择最合适的一个 | On systems with multiple GPUs, browser picks the best one
              let adapter;
              try {
                  adapter = await navigator.gpu.requestAdapter();
@@ -748,6 +1007,9 @@
                  return;
              }
 
+             // 步骤4: 从适配器请求GPU设备 (Device) | Step 4: Request GPU Device from Adapter
+             // Device是我们实际与GPU通信的对象 | Device is the object we actually use to communicate with the GPU
+             // 一个设备可以创建缓冲区、管线、纹理等GPU资源 | A device can create buffers, pipelines, textures, and other GPU resources
              let device;
              try {
                  device = await adapter.requestDevice();
@@ -761,23 +1023,54 @@
                  return;
              }
 
-             // --- Original script from this point onwards ---
+             // 步骤5: 配置画布的WebGPU上下文 | Step 5: Configure canvas WebGPU context
+             // context是画布和GPU之间的桥梁 | context is the bridge between canvas and GPU
              const context = canvas.getContext('webgpu');
+             // 获取首选的像素格式 (通常是 'bgra8unorm' 或 'rgba8unorm')
+             // Get preferred pixel format (usually 'bgra8unorm' or 'rgba8unorm')
              const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+             // 配置上下文：指定使用哪个设备、像素格式、透明度模式
+             // Configure context: specify which device to use, pixel format, alpha mode
              context.configure({ device, format: presentationFormat, alphaMode: 'premultiplied' });
 
+             // ==================================================
+             // 🎨 可调参数区域 | Adjustable Parameters Section
+             // ==================================================
+             // 这些参数可以修改以获得不同的视觉效果 | These parameters can be modified for different visual effects
+             
+             // ⚙️ 体素网格大小 | Voxel Grid Size
+             // 范围: 32-256 (必须是2的幂次方，如32, 64, 128, 256)
+             // Range: 32-256 (must be power of 2, like 32, 64, 128, 256)
+             // 更大的网格 = 更多细节，但性能更低 | Larger grid = more detail, but lower performance
+             // 更小的网格 = 更好性能，但细节较少 | Smaller grid = better performance, but less detail
              const VOXEL_GRID_SIZE = 128;
              const NUM_VOXELS = VOXEL_GRID_SIZE ** 3;
              document.getElementById('voxelCount').textContent = NUM_VOXELS.toLocaleString();
+             
+             // 🖱️ 相机平移灵敏度 | Camera Pan Sensitivity  
+             // 范围: 0.05-0.5 | Range: 0.05-0.5
+             // 更大的值 = 平移更快 | Larger value = faster panning
              const PAN_SENSITIVITY = 0.1;
 
-             const TOOL_PAINT_SAND = 0;
-             const TOOL_PAINT_STONE = 1;
-             const TOOL_DESTROY = 2;
-             const TOOL_PAINT_WATER = 3;
+             // 🛠️ 工具类型常量 | Tool Type Constants
+             // 这些常量定义了不同的绘制工具 | These constants define different painting tools
+             const TOOL_PAINT_SAND = 0;   // 沙子工具 | Sand tool
+             const TOOL_PAINT_STONE = 1;  // 石头工具 | Stone tool
+             const TOOL_DESTROY = 2;       // 销毁/擦除工具 | Destroy/erase tool
+             const TOOL_PAINT_WATER = 3;   // 水工具 | Water tool
 
+             // ==================================================
+             // 💡 动态光源系统 | Dynamic Light System
+             // ==================================================
+             // 💡 光源数量 | Number of Lights
+             // 范围: 8-64 | Range: 8-64
+             // 更多光源 = 更丰富的照明，但性能更低 | More lights = richer lighting, but lower performance
+             // 建议: 保持在16-32之间以获得良好的性能/质量平衡 | Recommended: keep between 16-32 for good performance/quality balance
              const NUM_LIGHTS = 32;
              const lights = [];
+             
+             // HSV转RGB的辅助函数 | HSV to RGB helper function
+             // 用于生成彩色光源 | Used to generate colorful lights
              function HSVtoRGB(h, s, v) {
                  let r, g, b, i, f, p, q, t;
                  i = Math.floor(h * 6); f = h * 6 - i;
@@ -789,23 +1082,84 @@
                  }
                  return [r, g, b];
              }
+             
+             // 初始化所有光源 | Initialize all lights
              for (let i = 0; i < NUM_LIGHTS; i++) {
                  lights.push({
+                     // 🎨 光源位置 | Light position (可以修改初始位置 | can modify initial position)
                      position: [Math.random() * VOXEL_GRID_SIZE, Math.random() * VOXEL_GRID_SIZE, Math.random() * VOXEL_GRID_SIZE],
+                     // 🌈 光源颜色 (HSV色轮随机选择) | Light color (randomly selected from HSV color wheel)
+                     // 修改 Math.random() 为固定值(0-1)可以得到特定颜色的光源 | Change Math.random() to fixed value (0-1) for specific color
+                     // 例如 0=红色, 0.33=绿色, 0.66=蓝色 | e.g., 0=red, 0.33=green, 0.66=blue
                      color: HSVtoRGB(Math.random(), 0.9, 1.0),
+                     // 🔦 光源半径 | Light radius
+                     // 范围: 10-50 | Range: 10-50  
+                     // 修改这里可以改变光照范围 | Modify here to change lighting range
                      radius: 20.0 + Math.random() * 15,
+                     // ⬇️ 光源下落速度 (负值表示向下) | Light falling velocity (negative = downward)
+                     // 范围: -60 到 -10 | Range: -60 to -10
+                     // 更负的值 = 下落更快 | More negative = falls faster
                      velocity: -20.0 - Math.random() * 20.0,
                  });
              }
 
+             // ==================================================
+             // 🎮 应用状态和配置 | Application State and Configuration
+             // ==================================================
+             
+             // ☀️ 太阳角度 (用于日夜循环) | Sun angle (for day/night cycle)
+             // 范围: 0 到 2π | Range: 0 to 2π
              let sunAngle = Math.PI / 4;
+             
+             // 当前选中的工具 | Currently selected tool
              let currentTool = TOOL_PAINT_SAND;
+             
+             // 地形类型: 1=山地地形, 0=平坦地形 | Terrain type: 1=mountainous terrain, 0=flat terrain
              let currentTerrainType = 1;
+             
+             // UI控制参数 | UI control parameters
              let uiControls = {
-                 sunSpeed: 0.02, brushSize: 10.5, continuousPaint: true, targetFarFaceOnAirHit: true, resolutionScale: 1.0, simSteps: 1, maxRaySteps: 384,
+                 // ☀️ 太阳旋转速度 | Sun rotation speed
+                 // 范围: 0-0.05 | Range: 0-0.05
+                 // 更大的值 = 日夜循环更快 | Larger value = faster day/night cycle
+                 sunSpeed: 0.02,
+                 
+                 // 🖌️ 画笔大小 | Brush size
+                 // 范围: 1-25 | Range: 1-25
+                 brushSize: 10.5,
+                 
+                 // 是否连续绘制 | Whether to paint continuously
+                 continuousPaint: true,
+                 
+                 // 当光线打到空气时是否瞄准远面 | Whether to target far face when ray hits air
+                 targetFarFaceOnAirHit: true,
+                 
+                 // 📐 渲染分辨率缩放 | Render resolution scale
+                 // 范围: 0.25-1.0 (25%-100%) | Range: 0.25-1.0 (25%-100%)
+                 // 降低可以提高性能 | Lower to improve performance
+                 resolutionScale: 1.0,
+                 
+                 // 🔄 每帧模拟步数 | Simulation steps per frame
+                 // 范围: 0-25 | Range: 0-25
+                 // 更多步数 = 更快的物理模拟，但性能更低 | More steps = faster physics simulation, but lower performance
+                 simSteps: 1,
+                 
+                 // 🔍 最大光线追踪步数 | Max ray marching steps
+                 // 范围: 64-384 | Range: 64-384
+                 // 更多步数 = 更远的渲染距离，但性能更低 | More steps = further render distance, but lower performance
+                 maxRaySteps: 384,
              };
+             
+             // 📷 轨道相机参数 | Orbital camera parameters
              let camera = {
-                 alpha: -0.5, beta: 0.3, radius: VOXEL_GRID_SIZE * 1.8, target: [VOXEL_GRID_SIZE / 2, 30, VOXEL_GRID_SIZE / 2],
+                 // 水平旋转角度 | Horizontal rotation angle
+                 alpha: -0.5,
+                 // 垂直旋转角度 | Vertical rotation angle
+                 beta: 0.3,
+                 // 相机距离目标点的距离 | Camera distance from target
+                 radius: VOXEL_GRID_SIZE * 1.8,
+                 // 相机看向的目标点 | Camera target point
+                 target: [VOXEL_GRID_SIZE / 2, 30, VOXEL_GRID_SIZE / 2],
              };
              let mouseState = {
                  buttons: [false, false, false], x: 0, y: 0, lastX: 0, lastY: 0, isPainting: false, isOrbiting: false, isPanning: false, hasFiredSingleShot: false,
@@ -831,79 +1185,132 @@
                 w: false, a: false, s: false, d: false, space: false, shift: false,
              };
 
+             // ==================================================
+             // 📜 WGSL着色器代码 - 公共部分 | WGSL Shader Code - Common Section
+             // ==================================================
+             // WGSL (WebGPU Shading Language) 是WebGPU使用的着色器语言
+             // WGSL (WebGPU Shading Language) is the shader language used by WebGPU
+             // 着色器在GPU上运行，速度非常快 | Shaders run on the GPU and are very fast
+             
              const commonShaderCode = `
+                 // 📦 体素数据结构 | Voxel Data Structure
+                 // 每个体素用一个32位无符号整数存储 | Each voxel is stored as a 32-bit unsigned integer
+                 // 这个整数包含: 类型、变体、更新标志、RGB光照信息 | This integer contains: type, variant, update flag, RGB lighting
                  struct VoxelData {
-                     data: atomic<u32>,
+                     data: atomic<u32>,  // atomic类型允许多个线程同时安全访问 | atomic type allows safe concurrent access
                  };
 
+                 // 💡 点光源结构 | Point Light Structure
                  struct PointLight {
-                     pos: vec3<f32>, radius: f32,
-                     color: vec3<f32>, intensity: f32,
+                     pos: vec3<f32>,      // 光源3D位置 | Light 3D position
+                     radius: f32,         // 光源影响半径 | Light influence radius
+                     color: vec3<f32>,    // 光源RGB颜色 | Light RGB color
+                     intensity: f32,      // 光源强度 | Light intensity
                  };
+                 
+                 // 🌍 场景全局数据 | Scene Global Data
                  struct SceneUniforms {
-                     lights: array<PointLight, ${NUM_LIGHTS}>,
-                     light_count: u32,
+                     lights: array<PointLight, ${NUM_LIGHTS}>,  // 所有光源的数组 | Array of all lights
+                     light_count: u32,                           // 光源数量 | Number of lights
                  };
 
+                 // 📷 渲染通道统一变量 | Render Pass Uniforms
+                 // 这些变量在每一帧都会更新，传递相机和渲染设置到着色器
+                 // These variables update every frame, passing camera and render settings to shaders
                  struct RenderPassUniforms {
-                     camera_position: vec3<f32>, camera_zoom: f32,
-                     camera_right: vec3<f32>, _padr: f32,
-                     camera_up: vec3<f32>, _padu: f32,
-                     camera_target_pos: vec3<f32>, _padt: f32,
-                     sun_direction: vec3<f32>,  _pads: f32,
-                     canvas_actual_dims: vec2<f32>,
-                     max_ray_steps: u32, _pad_mrs: u32,
+                     camera_position: vec3<f32>,    // 相机位置 | Camera position
+                     camera_zoom: f32,               // 相机缩放/FOV | Camera zoom/FOV
+                     camera_right: vec3<f32>,        // 相机右向量 | Camera right vector
+                     _padr: f32,                     // 填充对齐 | Padding for alignment
+                     camera_up: vec3<f32>,           // 相机上向量 | Camera up vector
+                     _padu: f32,                     // 填充对齐 | Padding for alignment
+                     camera_target_pos: vec3<f32>,   // 相机看向的目标点 | Camera target point
+                     _padt: f32,                     // 填充对齐 | Padding for alignment
+                     sun_direction: vec3<f32>,       // 太阳方向向量 | Sun direction vector
+                     _pads: f32,                     // 填充对齐 | Padding for alignment
+                     canvas_actual_dims: vec2<f32>,  // 画布实际像素尺寸 | Canvas actual pixel dimensions
+                     max_ray_steps: u32,             // 光线追踪最大步数 | Ray marching max steps
+                     _pad_mrs: u32,                  // 填充对齐 | Padding for alignment
                  };
 
+                 // 🖥️ 计算通道统一变量 | Compute Pass Uniforms
+                 // 用于物理模拟和交互的参数 | Parameters for physics simulation and interaction
                  struct ComputePassUniforms {
-                     camera_position: vec3<f32>, camera_zoom: f32,
-                     camera_right: vec3<f32>, _padr2: f32,
-                     camera_up: vec3<f32>, _padu2: f32,
-                     camera_target_pos: vec3<f32>, _padt2: f32,
-                     mouse_pos: vec2<f32>, canvas_dims: vec2<f32>,
-                     brush_size: f32, is_painting: u32,
-                     tool_type: u32, preview_active: u32,
-                     target_far_face_on_air_hit: u32, frame_num: u32,
-                     max_ray_steps_compute: u32, _pad_mrs_compute: u32,
+                     camera_position: vec3<f32>,     // 相机位置 | Camera position
+                     camera_zoom: f32,               // 相机缩放 | Camera zoom
+                     camera_right: vec3<f32>,        // 相机右向量 | Camera right vector
+                     _padr2: f32,
+                     camera_up: vec3<f32>,           // 相机上向量 | Camera up vector
+                     _padu2: f32,
+                     camera_target_pos: vec3<f32>,   // 相机目标 | Camera target
+                     _padt2: f32,
+                     mouse_pos: vec2<f32>,           // 鼠标位置 | Mouse position
+                     canvas_dims: vec2<f32>,         // 画布尺寸 | Canvas dimensions
+                     brush_size: f32,                // 画笔大小 | Brush size
+                     is_painting: u32,               // 是否正在绘制 | Whether painting
+                     tool_type: u32,                 // 工具类型 | Tool type
+                     preview_active: u32,            // 预览是否激活 | Whether preview is active
+                     target_far_face_on_air_hit: u32, // 目标选择模式 | Target selection mode
+                     frame_num: u32,                 // 帧编号 | Frame number
+                     max_ray_steps_compute: u32,     // 计算用的最大步数 | Max steps for compute
+                     _pad_mrs_compute: u32,
                  };
 
-                 struct TargetingOutput { aim_pos: vec4<f32>, hit: u32 };
+                 // 🎯 目标输出结构 | Targeting Output Structure
+                 // 用于存储光线追踪找到的目标位置 | Used to store target position found by ray tracing
+                 struct TargetingOutput { 
+                     aim_pos: vec4<f32>,  // 瞄准位置 | Aim position
+                     hit: u32             // 是否命中 | Whether hit
+                 };
 
-                 const VOXEL_TYPE_AIR = 0u;
-                 const VOXEL_TYPE_STONE = 1u;
-                 const VOXEL_TYPE_SAND = 2u;
-                 const VOXEL_TYPE_WATER = 3u;
+                 // 🧱 体素类型常量 | Voxel Type Constants
+                 // 这些常量定义了不同类型的体素 | These constants define different voxel types
+                 const VOXEL_TYPE_AIR = 0u;      // 空气(透明) | Air (transparent)
+                 const VOXEL_TYPE_STONE = 1u;    // 石头(固体) | Stone (solid)
+                 const VOXEL_TYPE_SAND = 2u;     // 沙子(会下落) | Sand (falls)
+                 const VOXEL_TYPE_WATER = 3u;    // 水(流动) | Water (flows)
 
+                 // 🛠️ 工具类型常量 | Tool Type Constants
                  const TOOL_TYPE_SAND = 0u;
                  const TOOL_TYPE_STONE = 1u;
                  const TOOL_TYPE_DESTROY = 2u;
                  const TOOL_TYPE_WATER = 3u;
 
+                 // 📏 网格尺寸 | Grid dimension
                  const GRID_DIM = ${VOXEL_GRID_SIZE}u;
 
-                 const MASK_TYPE = 7u;
-                 const SHIFT_TYPE = 0u;
-                 const MASK_VARIANT = 7u;
-                 const SHIFT_VARIANT = 3u;
-                 const MASK_UPDATED = 1u;
-                 const SHIFT_UPDATED = 6u;
+                 // 🔢 位操作掩码和偏移 | Bit manipulation masks and shifts
+                 // 用于将多个值打包到单个32位整数中 | Used to pack multiple values into a single 32-bit integer
+                 // 这样可以节省GPU内存 | This saves GPU memory
+                 const MASK_TYPE = 7u;           // 0b111 - 类型占用3位 | Type uses 3 bits
+                 const SHIFT_TYPE = 0u;          // 类型从第0位开始 | Type starts at bit 0
+                 const MASK_VARIANT = 7u;        // 0b111 - 变体占用3位 | Variant uses 3 bits
+                 const SHIFT_VARIANT = 3u;       // 变体从第3位开始 | Variant starts at bit 3
+                 const MASK_UPDATED = 1u;        // 0b1 - 更新标志占用1位 | Updated flag uses 1 bit
+                 const SHIFT_UPDATED = 6u;       // 标志从第6位开始 | Flag starts at bit 6
 
-                 const MASK_LIGHT = 255u;
-                 const SHIFT_LIGHT_R = 8u;
-                 const SHIFT_LIGHT_G = 16u;
-                 const SHIFT_LIGHT_B = 24u;
+                 const MASK_LIGHT = 255u;        // 0b11111111 - 每个光照通道8位 | Each light channel 8 bits
+                 const SHIFT_LIGHT_R = 8u;       // 红色通道从第8位开始 | Red channel starts at bit 8
+                 const SHIFT_LIGHT_G = 16u;      // 绿色通道从第16位开始 | Green channel starts at bit 16
+                 const SHIFT_LIGHT_B = 24u;      // 蓝色通道从第24位开始 | Blue channel starts at bit 24
 
+                 // 📦 解包后的体素结构 | Unpacked Voxel Structure
+                 // 将32位整数解包成易于使用的结构 | Unpacks 32-bit integer into easy-to-use structure
                  struct UnpackedVoxel {
-                     v_type: u32, v_variant: u32,
-                     is_updated: u32,
-                     light: vec3<f32>,
+                     v_type: u32,        // 体素类型 | Voxel type
+                     v_variant: u32,     // 颜色变体 | Color variant
+                     is_updated: u32,    // 本帧是否已更新 | Whether updated this frame
+                     light: vec3<f32>,   // RGB光照值 | RGB lighting value
                  };
 
+                 // 🔓 解包函数：从32位整数提取体素信息 | Unpack function: extract voxel info from 32-bit integer
                  fn unpackVoxel(data: u32) -> UnpackedVoxel {
                      var result: UnpackedVoxel;
+                     // 使用位操作提取每个字段 | Use bit operations to extract each field
                      result.v_type = (data >> SHIFT_TYPE) & MASK_TYPE;
                      result.v_variant = (data >> SHIFT_VARIANT) & MASK_VARIANT;
                      result.is_updated = (data >> SHIFT_UPDATED) & MASK_UPDATED;
+                     // 提取RGB光照值并归一化到0-1范围 | Extract RGB lighting and normalize to 0-1 range
                      let r = f32((data >> SHIFT_LIGHT_R) & MASK_LIGHT);
                      let g = f32((data >> SHIFT_LIGHT_G) & MASK_LIGHT);
                      let b = f32((data >> SHIFT_LIGHT_B) & MASK_LIGHT);
@@ -911,10 +1318,13 @@
                      return result;
                  }
 
+                 // 🔒 打包函数：将体素信息压缩到32位整数 | Pack function: compress voxel info into 32-bit integer
                  fn packVoxel(v_type: u32, v_variant: u32, is_updated: u32, light: vec3<f32>) -> u32 {
+                     // 将光照值从0-1范围转换到0-255范围 | Convert lighting from 0-1 range to 0-255 range
                      let r = u32(clamp(light.r * 255.0, 0.0, 255.0));
                      let g = u32(clamp(light.g * 255.0, 0.0, 255.0));
                      let b = u32(clamp(light.b * 255.0, 0.0, 255.0));
+                     // 使用位或操作将所有字段组合到一个整数中 | Use bit OR to combine all fields into one integer
                      return ((v_type & MASK_TYPE) << SHIFT_TYPE) |
                             ((v_variant & MASK_VARIANT) << SHIFT_VARIANT) |
                             ((is_updated & MASK_UPDATED) << SHIFT_UPDATED) |
@@ -923,22 +1333,32 @@
                             ((b & MASK_LIGHT) << SHIFT_LIGHT_B);
                  }
 
+                 // 快速提取函数：只获取类型和更新标志 | Fast extract functions: get only type and update flag
                  fn getVoxelType(data: u32) -> u32 { return (data >> SHIFT_TYPE) & MASK_TYPE; }
                  fn getVoxelIsUpdated(data: u32) -> u32 { return (data >> SHIFT_UPDATED) & MASK_UPDATED; }
 
+                 // 📍 坐标转索引函数 | Coordinate to index functions
+                 // 将3D坐标(x,y,z)转换为1D数组索引 | Convert 3D coordinates (x,y,z) to 1D array index
+                 // 使用公式: index = x + y*WIDTH + z*WIDTH*HEIGHT | Formula: index = x + y*WIDTH + z*WIDTH*HEIGHT
                  fn pos_to_idx(pos: vec3<u32>) -> u32 {
-                     if (any(pos >= vec3(GRID_DIM))) { return 0xFFFFFFFFu; }
+                     // 检查坐标是否越界 | Check if coordinates are out of bounds
+                     if (any(pos >= vec3(GRID_DIM))) { return 0xFFFFFFFFu; }  // 返回无效索引 | Return invalid index
                      return pos.x + pos.y * GRID_DIM + pos.z * GRID_DIM * GRID_DIM;
                  }
-                  fn pos_to_idx_i32(pos: vec3<i32>) -> u32 {
+                 
+                 // 带符号整数版本 | Signed integer version
+                 fn pos_to_idx_i32(pos: vec3<i32>) -> u32 {
                      if (any(pos < vec3(0)) || any(pos >= vec3<i32>(i32(GRID_DIM)))) { return 0xFFFFFFFFu; }
                      return u32(pos.x + pos.y * i32(GRID_DIM) + pos.z * i32(GRID_DIM) * i32(GRID_DIM));
                  }
+                 
+                 // 🎲 3D哈希函数：将3D坐标转换为伪随机浮点数 | 3D hash function: convert 3D coordinates to pseudo-random float
+                 // 用于生成随机变体和噪声 | Used to generate random variants and noise
                  fn hash3d_to_float(p: vec3<u32>) -> f32 {
-                     var p_mut = p * vec3(374761393u, 668265263u, 104395301u);
+                     var p_mut = p * vec3(374761393u, 668265263u, 104395301u);  // 大质数 | Large primes
                      p_mut = (p_mut ^ p_mut.yzx ^ p_mut.zxy) >> vec3(8u);
                      p_mut = p_mut * vec3(374761393u, 668265263u, 104395301u);
-                     return f32(p_mut.x ^ p_mut.y ^ p_mut.z) / 4294967295.0;
+                     return f32(p_mut.x ^ p_mut.y ^ p_mut.z) / 4294967295.0;  // 归一化到0-1 | Normalize to 0-1
                  }
              `;
 
@@ -1493,41 +1913,246 @@
                  }
              `;
 
+             // ==================================================
+             // 📦 GPU缓冲区创建 | GPU Buffer Creation
+             // ==================================================
+             // 缓冲区(Buffer)是GPU内存中的数据块 | Buffers are data blocks in GPU memory
+             // 它们用于在CPU和GPU之间传递数据 | They're used to pass data between CPU and GPU
+             
+             // 📏 计算体素缓冲区大小 | Calculate voxel buffer size
+             // 每个体素4字节(32位) | Each voxel is 4 bytes (32 bits)
              const VOXEL_BUFFER_SIZE = NUM_VOXELS * 4;
-             const voxelBuffer = device.createBuffer({ size: VOXEL_BUFFER_SIZE, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
-             const generationUniformsBuffer = device.createBuffer({ size: 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-             const renderPassUniformsBuffer = device.createBuffer({ size: 104, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-             const computePassUniformsBuffer = device.createBuffer({ size: 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-             const targetingOutputBuffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
-             const lightsUniformBuffer = device.createBuffer({ size: 32 * NUM_LIGHTS + 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-
-             const generationPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: generationShaderCode }), entryPoint: 'main' }});
-             const simulationPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: simulationShaderCode }), entryPoint: 'main' }});
-             const resetFlagsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: resetFlagsShaderCode }), entryPoint: 'main' }});
-             const lightingPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: lightingShaderCode }), entryPoint: 'main' }});
-             const paintPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: paintShaderCode }), entryPoint: 'main' }});
-             const clearLooseVoxelsPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: clearLooseVoxelsShaderCode }), entryPoint: 'main' }});
-             const targetingPipeline = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: targetingShaderCode }), entryPoint: 'main' }});
-             let renderPipeline = device.createRenderPipeline({
-                 layout: 'auto',
-                 vertex: { module: device.createShaderModule({ code: renderShaderCode }), entryPoint: 'vs_main' },
-                 fragment: { module: device.createShaderModule({ code: renderShaderCode }), entryPoint: 'fs_main', targets: [{ format: presentationFormat,
-                     blend: {
-                         color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-                         alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
-                     }
-                  }] },
-                 primitive: { topology: 'triangle-list' },
+             
+             // 🧱 体素缓冲区：存储所有体素数据 | Voxel buffer: stores all voxel data
+             // 用途: STORAGE(计算着色器读写) | COPY_SRC/DST(可以复制)
+             // Usage: STORAGE (compute shader read/write) | COPY_SRC/DST (can be copied)
+             const voxelBuffer = device.createBuffer({ 
+                 size: VOXEL_BUFFER_SIZE,  // 缓冲区大小(字节) | Buffer size in bytes
+                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST 
+             });
+             
+             // 🌍 世界生成参数缓冲区 | World generation parameters buffer
+             // 只存储一个u32值：地形类型 | Stores only one u32 value: terrain type
+             const generationUniformsBuffer = device.createBuffer({ 
+                 size: 4,  // 4字节 = 1个u32 | 4 bytes = 1 u32
+                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST 
+             });
+             
+             // 📷 渲染通道统一缓冲区 | Render pass uniform buffer
+             // 存储相机位置、方向、太阳方向等渲染参数 | Stores camera position, direction, sun direction, etc.
+             const renderPassUniformsBuffer = device.createBuffer({ 
+                 size: 104,  // 26个float(每个4字节) = 104字节 | 26 floats (4 bytes each) = 104 bytes
+                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST 
+             });
+             
+             // 🖥️ 计算通道统一缓冲区 | Compute pass uniform buffer
+             // 存储物理模拟和工具交互所需的参数 | Stores parameters for physics simulation and tool interaction
+             const computePassUniformsBuffer = device.createBuffer({ 
+                 size: 144,  // 36个float/uint = 144字节 | 36 floats/uints = 144 bytes
+                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST 
+             });
+             
+             // 🎯 目标输出缓冲区 | Targeting output buffer
+             // 存储光线追踪找到的目标位置 | Stores target position found by ray tracing
+             const targetingOutputBuffer = device.createBuffer({ 
+                 size: 32,  // vec4<f32> + u32 + 填充 | vec4<f32> + u32 + padding
+                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC 
+             });
+             
+             // 💡 光源统一缓冲区 | Lights uniform buffer
+             // 存储所有动态点光源的数据 | Stores data for all dynamic point lights
+             const lightsUniformBuffer = device.createBuffer({ 
+                 size: 32 * NUM_LIGHTS + 16,  // 每个光源32字节 + 16字节元数据 | 32 bytes per light + 16 bytes metadata
+                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST 
              });
 
-             const generationBindGroup = device.createBindGroup({ layout: generationPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: generationUniformsBuffer } } ]});
-             const simulationBindGroup = device.createBindGroup({ layout: simulationPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: computePassUniformsBuffer } }]});
-             const resetFlagsBindGroup = device.createBindGroup({ layout: resetFlagsPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }]});
-             const lightBindGroup = device.createBindGroup({ layout: lightingPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: lightsUniformBuffer } }]});
-             const paintBindGroup = device.createBindGroup({ layout: paintPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: computePassUniformsBuffer } }, { binding: 2, resource: { buffer: targetingOutputBuffer } }]});
-             const clearLooseBindGroup = device.createBindGroup({ layout: clearLooseVoxelsPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: voxelBuffer } }]});
-             const targetingBindGroup = device.createBindGroup({ layout: targetingPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: computePassUniformsBuffer } }, { binding: 2, resource: { buffer: targetingOutputBuffer } }]});
-             const renderBindGroup = device.createBindGroup({ layout: renderPipeline.getBindGroupLayout(0), entries: [ { binding: 0, resource: { buffer: voxelBuffer } }, { binding: 1, resource: { buffer: renderPassUniformsBuffer } }, { binding: 2, resource: { buffer: computePassUniformsBuffer } }, { binding: 3, resource: { buffer: targetingOutputBuffer } } ]});
+             // ==================================================
+             // 🔧 GPU管线创建 | GPU Pipeline Creation
+             // ==================================================
+             // 管线(Pipeline)定义了GPU如何处理数据 | Pipelines define how GPU processes data
+             // 每个管线包含着色器代码和配置 | Each pipeline contains shader code and configuration
+             
+             // 🌍 世界生成管线 | World generation pipeline
+             // 用途: 初始化体素网格，生成地形或平坦世界 | Purpose: Initialize voxel grid, generate terrain or flat world
+             const generationPipeline = device.createComputePipeline({ 
+                 layout: 'auto',  // 自动推断布局 | Auto-infer layout
+                 compute: { 
+                     module: device.createShaderModule({ code: generationShaderCode }),  // 编译着色器代码 | Compile shader code
+                     entryPoint: 'main'  // 入口函数名 | Entry function name
+                 }
+             });
+             
+             // ⚡ 物理模拟管线 | Physics simulation pipeline
+             // 用途: 模拟沙子下落、水流动等物理效果 | Purpose: Simulate sand falling, water flowing, etc.
+             const simulationPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: simulationShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 🔄 重置标志管线 | Reset flags pipeline
+             // 用途: 清除每帧的"已更新"标志，准备下一帧物理模拟 | Purpose: Clear "updated" flags each frame for next physics step
+             const resetFlagsPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: resetFlagsShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 💡 光照计算管线 | Lighting calculation pipeline
+             // 用途: 计算动态点光源对体素的照明 | Purpose: Calculate dynamic point light illumination on voxels
+             const lightingPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: lightingShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 🖌️ 绘制工具管线 | Paint tool pipeline
+             // 用途: 应用用户的绘制操作(添加/删除体素) | Purpose: Apply user's painting operations (add/remove voxels)
+             const paintPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: paintShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 🧹 清除松散体素管线 | Clear loose voxels pipeline
+             // 用途: 移除所有沙子和水，只保留石头 | Purpose: Remove all sand and water, keep only stone
+             const clearLooseVoxelsPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: clearLooseVoxelsShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 🎯 目标定位管线 | Targeting pipeline
+             // 用途: GPU光线追踪找到鼠标指向的3D位置 | Purpose: GPU ray tracing to find 3D position under mouse cursor
+             const targetingPipeline = device.createComputePipeline({ 
+                 layout: 'auto', 
+                 compute: { 
+                     module: device.createShaderModule({ code: targetingShaderCode }), 
+                     entryPoint: 'main' 
+                 }
+             });
+             
+             // 🎨 渲染管线 | Render pipeline
+             // 用途: 将3D体素世界渲染到2D屏幕 | Purpose: Render 3D voxel world to 2D screen
+             // 这是唯一的渲染管线，其他都是计算管线 | This is the only render pipeline, others are compute pipelines
+             let renderPipeline = device.createRenderPipeline({
+                 layout: 'auto',
+                 vertex: { 
+                     module: device.createShaderModule({ code: renderShaderCode }), 
+                     entryPoint: 'vs_main'  // 顶点着色器入口 | Vertex shader entry
+                 },
+                 fragment: { 
+                     module: device.createShaderModule({ code: renderShaderCode }), 
+                     entryPoint: 'fs_main',  // 片段着色器入口 | Fragment shader entry
+                     targets: [{ 
+                         format: presentationFormat,  // 输出格式 | Output format
+                         // 混合模式: 支持透明度 | Blend mode: supports transparency
+                         blend: {
+                             color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                             alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+                         }
+                      }] 
+                 },
+                 primitive: { topology: 'triangle-list' },  // 绘制三角形 | Draw triangles
+             });
+
+             // ==================================================
+             // 🔗 绑定组创建 | Bind Group Creation
+             // ==================================================
+             // 绑定组(Bind Group)将缓冲区绑定到着色器 | Bind groups connect buffers to shaders
+             // 每个管线需要知道从哪里读取数据，绑定组提供这个映射 | Each pipeline needs to know where to read data, bind groups provide this mapping
+             
+             // 🌍 世界生成绑定组 | World generation bind group
+             // 绑定: 体素缓冲区(读写) + 生成参数(只读) | Binds: voxel buffer (read/write) + generation params (read-only)
+             const generationBindGroup = device.createBindGroup({ 
+                 layout: generationPipeline.getBindGroupLayout(0),  // 从管线获取布局 | Get layout from pipeline
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } },           // @binding(0): 体素数据 | voxel data
+                     { binding: 1, resource: { buffer: generationUniformsBuffer } } // @binding(1): 生成参数 | generation params
+                 ]
+             });
+             
+             // ⚡ 物理模拟绑定组 | Physics simulation bind group
+             // 绑定: 体素缓冲区(读写) + 计算参数(只读) | Binds: voxel buffer (read/write) + compute params (read-only)
+             const simulationBindGroup = device.createBindGroup({ 
+                 layout: simulationPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }, 
+                     { binding: 1, resource: { buffer: computePassUniformsBuffer } }
+                 ]
+             });
+             
+             // 🔄 重置标志绑定组 | Reset flags bind group
+             // 只需要体素缓冲区 | Only needs voxel buffer
+             const resetFlagsBindGroup = device.createBindGroup({ 
+                 layout: resetFlagsPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }
+                 ]
+             });
+             
+             // 💡 光照计算绑定组 | Lighting calculation bind group
+             // 绑定: 体素缓冲区(读写) + 光源数据(只读) | Binds: voxel buffer (read/write) + light data (read-only)
+             const lightBindGroup = device.createBindGroup({ 
+                 layout: lightingPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }, 
+                     { binding: 1, resource: { buffer: lightsUniformBuffer } }
+                 ]
+             });
+             
+             // 🖌️ 绘制工具绑定组 | Paint tool bind group
+             // 绑定: 体素缓冲区(读写) + 工具参数(只读) + 目标位置(只读) | Binds: voxel buffer + tool params + target position
+             const paintBindGroup = device.createBindGroup({ 
+                 layout: paintPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }, 
+                     { binding: 1, resource: { buffer: computePassUniformsBuffer } }, 
+                     { binding: 2, resource: { buffer: targetingOutputBuffer } }
+                 ]
+             });
+             
+             // 🧹 清除松散体素绑定组 | Clear loose voxels bind group
+             const clearLooseBindGroup = device.createBindGroup({ 
+                 layout: clearLooseVoxelsPipeline.getBindGroupLayout(0), 
+                 entries: [
+                     { binding: 0, resource: { buffer: voxelBuffer } }
+                 ]
+             });
+             
+             // 🎯 目标定位绑定组 | Targeting bind group
+             // 绑定: 体素缓冲区(只读) + 计算参数(只读) + 输出缓冲区(写入) | Binds: voxel buffer + compute params + output buffer
+             const targetingBindGroup = device.createBindGroup({ 
+                 layout: targetingPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }, 
+                     { binding: 1, resource: { buffer: computePassUniformsBuffer } }, 
+                     { binding: 2, resource: { buffer: targetingOutputBuffer } }
+                 ]
+             });
+             
+             // 🎨 渲染绑定组 | Render bind group
+             // 绑定: 体素缓冲区(只读) + 渲染参数(只读) + 工具参数(只读) + 目标位置(只读)
+             // Binds: voxel buffer + render params + tool params + target position
+             const renderBindGroup = device.createBindGroup({ 
+                 layout: renderPipeline.getBindGroupLayout(0), 
+                 entries: [ 
+                     { binding: 0, resource: { buffer: voxelBuffer } }, 
+                     { binding: 1, resource: { buffer: renderPassUniformsBuffer } }, 
+                     { binding: 2, resource: { buffer: computePassUniformsBuffer } }, 
+                     { binding: 3, resource: { buffer: targetingOutputBuffer } } 
+                 ]
+             });
 
              function resizeCanvasAndContext() {
                  const newScale = parseFloat(document.getElementById('resolutionScale').value);
@@ -1794,156 +2419,230 @@
              }
 
              let lastFrameTime = performance.now();
+             
+             // ==================================================
+             // 🎬 主渲染循环 | Main Render Loop
+             // ==================================================
+             // 这个函数每帧都会被调用(通常60次/秒) | This function is called every frame (typically 60 times/second)
+             // 它更新物理、光照、渲染整个场景 | It updates physics, lighting, and renders the entire scene
              async function frame() {
+                 // ⏱️ 计算帧时间差(deltaTime) | Calculate frame time delta (deltaTime)
                  const now = performance.now();
-                 const deltaTime = (now - lastFrameTime) / 1000.0;
+                 const deltaTime = (now - lastFrameTime) / 1000.0;  // 转换为秒 | Convert to seconds
                  
-                 // Update first-person camera if in that mode
+                 // 🎮 更新第一人称相机(如果在FPS模式) | Update first-person camera (if in FPS mode)
                  updateFirstPersonCamera(deltaTime);
                  
-                 // Calculate camera position and orientation based on mode
+                 // 📷 根据相机模式计算相机位置和方向 | Calculate camera position and orientation based on mode
                  if (cameraMode === 'firstperson') {
+                    // 第一人称模式: 直接使用位置和朝向 | First-person mode: use position and orientation directly
                     currentCamX = firstPersonCamera.position[0];
                     currentCamY = firstPersonCamera.position[1];
                     currentCamZ = firstPersonCamera.position[2];
                     
-                    // Calculate view direction from yaw and pitch
+                    // 从yaw(水平)和pitch(垂直)角度计算前向量 | Calculate forward vector from yaw and pitch angles
                     currentForward = [
                        Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
                        Math.sin(firstPersonCamera.pitch),
                        Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
                     ];
                     
-                    const wUp = [0, 1, 0];
+                    const wUp = [0, 1, 0];  // 世界向上向量 | World up vector
+                    // 计算右向量(叉乘) | Calculate right vector (cross product)
                     currentRight = [
                        Math.sin(firstPersonCamera.yaw),
                        0,
                        -Math.cos(firstPersonCamera.yaw)
                     ];
                     
+                    // 计算上向量(叉乘) | Calculate up vector (cross product)
                     currentUp = [
                        currentForward[1] * currentRight[2] - currentForward[2] * currentRight[1],
                        currentForward[2] * currentRight[0] - currentForward[0] * currentRight[2],
                        currentForward[0] * currentRight[1] - currentForward[1] * currentRight[0]
                     ];
+                    // 归一化上向量 | Normalize up vector
                     let up_n_raw = Math.hypot(...currentUp);
                     let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
                     currentUp = [currentUp[0]/up_n_val, currentUp[1]/up_n_val, currentUp[2]/up_n_val];
                     
                  } else {
-                    // Orbital camera mode
+                    // 轨道相机模式: 围绕目标点旋转 | Orbital camera mode: rotate around target point
+                    // 使用球坐标转换为笛卡尔坐标 | Convert spherical coordinates to Cartesian
                     currentCamX = camera.target[0] + camera.radius * Math.cos(camera.beta) * Math.sin(camera.alpha);
                     currentCamY = camera.target[1] + camera.radius * Math.sin(camera.beta);
                     currentCamZ = camera.target[2] + camera.radius * Math.cos(camera.beta) * Math.cos(camera.alpha);
 
+                    // 计算相机前向量(从相机指向目标) | Calculate camera forward (from camera to target)
                     const fwd_un = [camera.target[0]-currentCamX, camera.target[1]-currentCamY, camera.target[2]-currentCamZ];
                     let fwd_n_raw = Math.hypot(...fwd_un);
                     let fwd_n_val = fwd_n_raw === 0 ? 1.0 : fwd_n_raw;
                     currentForward = [fwd_un[0]/fwd_n_val, fwd_un[1]/fwd_n_val, fwd_un[2]/fwd_n_val];
 
                     const wUp = [0,1,0];
+                    // 计算右向量 | Calculate right vector
                     currentRight = [currentForward[1]*wUp[2]-currentForward[2]*wUp[1], currentForward[2]*wUp[0]-currentForward[0]*wUp[2], currentForward[0]*wUp[1]-currentForward[1]*wUp[0]];
                     let r_n_raw = Math.hypot(...currentRight);
                     let r_n_val = r_n_raw === 0 ? 1.0 : r_n_raw;
                     currentRight = [currentRight[0]/r_n_val, currentRight[1]/r_n_val, currentRight[2]/r_n_val];
 
+                    // 计算上向量 | Calculate up vector
                     currentUp = [currentRight[1]*currentForward[2]-currentRight[2]*currentForward[1], currentRight[2]*currentForward[0]-currentRight[0]*currentForward[2], currentRight[0]*currentForward[1]-currentRight[1]*currentForward[0]];
                     let up_n_raw = Math.hypot(...currentUp);
                     let up_n_val = up_n_raw === 0 ? 1.0 : up_n_raw;
                     currentUp = [currentUp[0]/up_n_val, currentUp[1]/up_n_val, currentUp[2]/up_n_val];
                  }
 
+                 // ☀️ 更新太阳角度(日夜循环) | Update sun angle (day/night cycle)
+                 // 🎨 可调参数: sunSpeed控制日夜循环速度 | Adjustable: sunSpeed controls day/night cycle speed
                  sunAngle += uiControls.sunSpeed * 0.2;
+                 // 从角度计算太阳方向向量 | Calculate sun direction vector from angle
                  const sunDirection = [Math.cos(sunAngle), 0.707, Math.sin(sunAngle)];
                  
-                 // Calculate camera target position (point we're looking at)
+                 // 计算相机目标位置 | Calculate camera target position
                  const cameraTarget = cameraMode === 'firstperson' 
                     ? [currentCamX + currentForward[0], currentCamY + currentForward[1], currentCamZ + currentForward[2]]
                     : camera.target;
                  
+                 // 💡 更新动态光源位置 | Update dynamic light positions
                  const lightData = new Float32Array(8 * NUM_LIGHTS);
                  for(let i = 0; i < NUM_LIGHTS; i++) {
+                     // 光源向下移动 | Lights move downward
                      lights[i].position[1] += lights[i].velocity * deltaTime;
+                     // 如果光源落到底部，重置到顶部 | If light falls below bottom, reset to top
                      if (lights[i].position[1] < -lights[i].radius) {
                          lights[i].position[0] = Math.random() * VOXEL_GRID_SIZE;
                          lights[i].position[1] = VOXEL_GRID_SIZE + lights[i].radius;
                          lights[i].position[2] = Math.random() * VOXEL_GRID_SIZE;
                      }
+                     // 将光源数据写入Float32Array | Write light data to Float32Array
                      const offset = i * 8;
-                     lightData.set(lights[i].position, offset); lightData[offset + 3] = lights[i].radius;
-                     lightData.set(lights[i].color, offset + 4); lightData[offset + 7] = 1.0;
+                     lightData.set(lights[i].position, offset); 
+                     lightData[offset + 3] = lights[i].radius;
+                     lightData.set(lights[i].color, offset + 4); 
+                     lightData[offset + 7] = 1.0;  // 强度 | Intensity
                  }
+                 // 📤 上传光源数据到GPU | Upload light data to GPU
                  device.queue.writeBuffer(lightsUniformBuffer, 0, lightData.buffer);
                  device.queue.writeBuffer(lightsUniformBuffer, 32 * NUM_LIGHTS, new Uint32Array([NUM_LIGHTS]));
 
+                 // 📷 准备渲染参数并上传到GPU | Prepare render parameters and upload to GPU
                  const renderUBO = new Float32Array(renderPassUniformsBuffer.size/4);
                  const renderUBOInt = new Uint32Array(renderUBO.buffer);
-                 renderUBO.set([currentCamX,currentCamY,currentCamZ], 0); renderUBO.set([2.0], 3); renderUBO.set(currentRight, 4); renderUBO.set(currentUp, 8);
-                 renderUBO.set(cameraTarget, 12); renderUBO.set(sunDirection, 16); renderUBO.set([canvas.width,canvas.height], 20);
-                 renderUBOInt[22] = uiControls.maxRaySteps;
+                 renderUBO.set([currentCamX,currentCamY,currentCamZ], 0); 
+                 renderUBO.set([2.0], 3);  // FOV/zoom
+                 renderUBO.set(currentRight, 4); 
+                 renderUBO.set(currentUp, 8);
+                 renderUBO.set(cameraTarget, 12); 
+                 renderUBO.set(sunDirection, 16); 
+                 renderUBO.set([canvas.width,canvas.height], 20);
+                 renderUBOInt[22] = uiControls.maxRaySteps;  // 最大光线步数 | Max ray steps
                  device.queue.writeBuffer(renderPassUniformsBuffer, 0, renderUBO);
 
+                 // 🖥️ 准备计算参数并上传到GPU | Prepare compute parameters and upload to GPU
                  const computeUBO = new Float32Array(computePassUniformsBuffer.size/4);
                  const computeUBOInt = new Uint32Array(computeUBO.buffer);
-                 computeUBO.set([currentCamX,currentCamY,currentCamZ], 0); computeUBO.set([2.0], 3); computeUBO.set(currentRight, 4); computeUBO.set(currentUp, 8);
+                 computeUBO.set([currentCamX,currentCamY,currentCamZ], 0); 
+                 computeUBO.set([2.0], 3); 
+                 computeUBO.set(currentRight, 4); 
+                 computeUBO.set(currentUp, 8);
                  computeUBO.set(cameraTarget, 12);
-                 // In first-person mode, always target center of screen
+                 // 在第一人称模式下，始终瞄准屏幕中心 | In first-person mode, always aim at screen center
                  const mx = cameraMode === 'firstperson' ? canvas.width / 2 : mouseState.x * (canvas.width / canvas.clientWidth);
                  const my = cameraMode === 'firstperson' ? canvas.height / 2 : mouseState.y * (canvas.height / canvas.clientHeight);
-                 computeUBO.set([mx, my], 16); computeUBO.set([canvas.width, canvas.height], 18); computeUBO.set([uiControls.brushSize], 20);
+                 computeUBO.set([mx, my], 16); 
+                 computeUBO.set([canvas.width, canvas.height], 18); 
+                 computeUBO.set([uiControls.brushSize], 20);
                  let paintingGPU = (mouseState.buttons[0] && (cameraMode === 'firstperson' || !spacebarDown)) && (uiControls.continuousPaint || mouseState.isPainting);
                  computeUBOInt[21] = paintingGPU ? 1:0;
-                 computeUBOInt[22] = currentTool; computeUBOInt[23] = isPreviewVisible ? 1:0;
+                 computeUBOInt[22] = currentTool; 
+                 computeUBOInt[23] = isPreviewVisible ? 1:0;
                  computeUBOInt[24] = uiControls.targetFarFaceOnAirHit ? 1:0;
                  computeUBOInt[25] = frameCount;
                  computeUBOInt[26] = uiControls.maxRaySteps;
                  device.queue.writeBuffer(computePassUniformsBuffer, 0, computeUBO);
                  if (!uiControls.continuousPaint && mouseState.isPainting) mouseState.isPainting = false;
 
+                 // ==================================================
+                 // 🚀 GPU命令编码和执行 | GPU Command Encoding and Execution
+                 // ==================================================
+                 // CommandEncoder记录要发送到GPU的命令 | CommandEncoder records commands to send to GPU
                  const commandEncoder = device.createCommandEncoder();
 
+                 // 🎯 第1步: 目标定位通道 | Step 1: Targeting pass
+                 // 使用GPU光线追踪找到鼠标指向的3D位置 | Use GPU ray tracing to find 3D position under mouse
                  const passTarget = commandEncoder.beginComputePass();
-                 passTarget.setPipeline(targetingPipeline); passTarget.setBindGroup(0, targetingBindGroup);
-                 passTarget.dispatchWorkgroups(1); passTarget.end();
+                 passTarget.setPipeline(targetingPipeline); 
+                 passTarget.setBindGroup(0, targetingBindGroup);
+                 passTarget.dispatchWorkgroups(1);  // 只需要1个工作组 | Only need 1 workgroup
+                 passTarget.end();
 
+                 // ⚡ 第2步: 物理模拟通道(可能多次) | Step 2: Physics simulation pass (possibly multiple times)
+                 // 🎨 可调参数: uiControls.simSteps控制每帧模拟步数 | Adjustable: simSteps controls simulation steps per frame
                  if (uiControls.simSteps > 0) {
                      for (let i = 0; i < uiControls.simSteps; i++) {
+                         // 重置"已更新"标志 | Reset "updated" flags
                          const passReset = commandEncoder.beginComputePass();
-                         passReset.setPipeline(resetFlagsPipeline); passReset.setBindGroup(0, resetFlagsBindGroup);
-                         passReset.dispatchWorkgroups(VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 4); passReset.end();
+                         passReset.setPipeline(resetFlagsPipeline); 
+                         passReset.setBindGroup(0, resetFlagsBindGroup);
+                         // dispatchWorkgroups启动GPU计算 | dispatchWorkgroups launches GPU compute
+                         // 参数是工作组数量，不是线程数 | Parameters are workgroup counts, not thread counts
+                         passReset.dispatchWorkgroups(VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 4); 
+                         passReset.end();
 
+                         // 执行物理模拟 | Execute physics simulation
                          const passSim = commandEncoder.beginComputePass();
-                         passSim.setPipeline(simulationPipeline); passSim.setBindGroup(0, simulationBindGroup);
-                         passSim.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4); passSim.end();
+                         passSim.setPipeline(simulationPipeline); 
+                         passSim.setBindGroup(0, simulationBindGroup);
+                         passSim.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4); 
+                         passSim.end();
                      }
                  }
 
+                 // 🖌️ 第3步: 绘制工具应用 | Step 3: Paint tool application
                  if (paintingGPU) {
                      const passPaint = commandEncoder.beginComputePass();
-                     passPaint.setPipeline(paintPipeline); passPaint.setBindGroup(0, paintBindGroup);
+                     passPaint.setPipeline(paintPipeline); 
+                     passPaint.setBindGroup(0, paintBindGroup);
                      const d = Math.ceil(uiControls.brushSize * 2.0);
                      passPaint.dispatchWorkgroups(Math.ceil(d/4), Math.ceil(d/4), Math.ceil(d/4));
                      passPaint.end();
                  }
 
+                 // 💡 第4步: 光照计算通道 | Step 4: Lighting calculation pass
                  const passLight = commandEncoder.beginComputePass();
-                 passLight.setPipeline(lightingPipeline); passLight.setBindGroup(0, lightBindGroup);
+                 passLight.setPipeline(lightingPipeline); 
+                 passLight.setBindGroup(0, lightBindGroup);
                  passLight.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4);
                  passLight.end();
 
-                 const passRender = commandEncoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), clearValue: [0.1, 0.1, 0.2, 1.0], loadOp: 'clear', storeOp: 'store' }] });
-                 passRender.setPipeline(renderPipeline); passRender.setBindGroup(0, renderBindGroup);
-                 passRender.draw(3);
+                 // 🎨 第5步: 渲染通道 | Step 5: Render pass
+                 // 这是唯一的渲染通道，将3D场景绘制到屏幕 | This is the only render pass, draws 3D scene to screen
+                 const passRender = commandEncoder.beginRenderPass({ 
+                     colorAttachments: [{ 
+                         view: context.getCurrentTexture().createView(),  // 获取画布纹理 | Get canvas texture
+                         clearValue: [0.1, 0.1, 0.2, 1.0],  // 清除颜色(深蓝色) | Clear color (dark blue)
+                         loadOp: 'clear',   // 清除之前的内容 | Clear previous content
+                         storeOp: 'store'   // 保存渲染结果 | Store render result
+                     }] 
+                 });
+                 passRender.setPipeline(renderPipeline); 
+                 passRender.setBindGroup(0, renderBindGroup);
+                 passRender.draw(3);  // 绘制3个顶点(全屏三角形) | Draw 3 vertices (fullscreen triangle)
                  passRender.end();
 
+                 // 🚀 提交所有命令到GPU执行 | Submit all commands to GPU for execution
                  device.queue.submit([commandEncoder.finish()]);
 
+                 // 📊 更新FPS显示 | Update FPS display
                  document.getElementById('fps').textContent = (1000 / (now - lastFrameTime)).toFixed(1);
                  lastFrameTime = now;
                  frameCount++;
+                 
+                 // 🔄 请求下一帧 | Request next frame
                  requestAnimationFrame(frame);
              }
-             frame(); // Start the render loop
+             frame(); // 启动渲染循环 | Start the render loop
          } // End of initAndRun
 
          // Call the main async function and catch any errors
