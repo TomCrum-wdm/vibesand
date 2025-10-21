@@ -1171,7 +1171,7 @@
              let currentForward=[0,0,1], currentRight=[1,0,0], currentUp=[0,1,0];
              let cameraMode = 'orbital'; // 'orbital' or 'firstperson'
              let firstPersonCamera = {
-                position: [VOXEL_GRID_SIZE / 2, 35, VOXEL_GRID_SIZE / 2],
+                position: [VOXEL_GRID_SIZE / 2, VOXEL_GRID_SIZE - 10, VOXEL_GRID_SIZE / 2], // Spawn high above terrain
                 yaw: -Math.PI / 2, // Looking towards +X initially
                 pitch: 0,
                 velocity: [0, 0, 0],
@@ -2314,7 +2314,7 @@
                  if (cameraMode === 'firstperson' && document.pointerLockElement === canvas) {
                     // First-person mouse look
                     const sensitivity = 0.002;
-                    firstPersonCamera.yaw += e.movementX * sensitivity;
+                    firstPersonCamera.yaw -= e.movementX * sensitivity;
                     firstPersonCamera.pitch -= e.movementY * sensitivity;
                     firstPersonCamera.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, firstPersonCamera.pitch));
                  } else if (cameraMode === 'orbital') {
