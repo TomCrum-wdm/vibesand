@@ -1291,6 +1291,103 @@
                      let oc = ro - c; let b = dot(oc, rd); let h = b*b - dot(oc, oc) + r*r;
                      if (h < 0.0) { return -1.0; } else { return -b - sqrt(h); }
                  }
+                 
+                 // Hash function for procedural noise
+                 fn hash13(p3: vec3<f32>) -> f32 {
+                     var p = fract(p3 * 0.1031);
+                     p += dot(p, p.zyx + 31.32);
+                     return fract((p.x + p.y) * p.z);
+                 }
+                 
+                 // 3D value noise for cloud generation
+                 fn noise3d(p: vec3<f32>) -> f32 {
+                     let i = floor(p);
+                     let f = fract(p);
+                     let u = f * f * (3.0 - 2.0 * f);
+                     
+                     return mix(
+                         mix(
+                             mix(hash13(i + vec3(0.0, 0.0, 0.0)), hash13(i + vec3(1.0, 0.0, 0.0)), u.x),
+                             mix(hash13(i + vec3(0.0, 1.0, 0.0)), hash13(i + vec3(1.0, 1.0, 0.0)), u.x),
+                             u.y
+                         ),
+                         mix(
+                             mix(hash13(i + vec3(0.0, 0.0, 1.0)), hash13(i + vec3(1.0, 0.0, 1.0)), u.x),
+                             mix(hash13(i + vec3(0.0, 1.0, 1.0)), hash13(i + vec3(1.0, 1.0, 1.0)), u.x),
+                             u.y
+                         ),
+                         u.z
+                     );
+                 }
+                 
+                 // Fractal Brownian Motion for clouds
+                 fn fbm(p: vec3<f32>) -> f32 {
+                     var value = 0.0;
+                     var amplitude = 0.5;
+                     var frequency = 1.0;
+                     var p_var = p;
+                     
+                     for (var i = 0; i < 4; i = i + 1) {
+                         value += amplitude * noise3d(p_var * frequency);
+                         frequency *= 2.0;
+                         amplitude *= 0.5;
+                     }
+                     
+                     return value;
+                 }
+                 
+                 // Enhanced sky rendering with sun and clouds
+                 fn compute_sky_color(ray_dir: vec3<f32>, sun_dir: vec3<f32>, time: f32) -> vec3<f32> {
+                     // Atmospheric gradient - horizon to zenith
+                     let y_factor = max(ray_dir.y, 0.0);
+                     let horizon_color = vec3(0.6, 0.75, 0.9);  // Light blue at horizon
+                     let zenith_color = vec3(0.2, 0.4, 0.8);     // Deeper blue at zenith
+                     var sky_color = mix(horizon_color, zenith_color, pow(y_factor, 0.6));
+                     
+                     // Add sunset/sunrise gradient near horizon
+                     let sunset_factor = pow(1.0 - y_factor, 3.0) * max(sun_dir.y + 0.2, 0.0);
+                     let sunset_color = vec3(1.0, 0.6, 0.3);
+                     sky_color = mix(sky_color, sunset_color, sunset_factor * 0.4);
+                     
+                     // Sun disk
+                     let sun_dot = dot(ray_dir, normalize(sun_dir));
+                     let sun_intensity = pow(max(sun_dot, 0.0), 128.0);
+                     let sun_glow = pow(max(sun_dot, 0.0), 8.0) * 0.15;
+                     let sun_corona = pow(max(sun_dot, 0.0), 2.0) * 0.05;
+                     sky_color += vec3(1.0, 0.95, 0.8) * (sun_intensity + sun_glow + sun_corona);
+                     
+                     // Procedural clouds (only in upper hemisphere for performance)
+                     if (ray_dir.y > 0.05) {
+                         // Map ray direction to cloud texture coordinates
+                         let cloud_scale = 0.8;
+                         let cloud_pos = vec3(ray_dir.x / (ray_dir.y + 0.1), time * 0.02, ray_dir.z / (ray_dir.y + 0.1)) * cloud_scale;
+                         
+                         // Generate cloud density with multiple octaves
+                         var cloud_density = fbm(cloud_pos);
+                         
+                         // Add second layer of smaller clouds
+                         let cloud_detail = noise3d(cloud_pos * 3.0 + vec3(time * 0.05, 0.0, 0.0)) * 0.3;
+                         cloud_density = cloud_density * 0.7 + cloud_detail;
+                         
+                         // Sharpen clouds (make them more defined)
+                         cloud_density = smoothstep(0.4, 0.7, cloud_density);
+                         
+                         // Cloud color influenced by sun
+                         let cloud_sun_dot = dot(normalize(vec3(ray_dir.x, 0.0, ray_dir.z)), normalize(vec3(sun_dir.x, 0.0, sun_dir.z)));
+                         let cloud_lighting = 0.7 + 0.3 * max(cloud_sun_dot, 0.0);
+                         
+                         let cloud_color = vec3(0.9, 0.92, 0.95) * cloud_lighting;
+                         
+                         // Fade clouds based on view angle (less visible when looking straight up or down)
+                         let cloud_fade = smoothstep(0.05, 0.3, ray_dir.y) * (1.0 - smoothstep(0.7, 0.95, ray_dir.y));
+                         cloud_density *= cloud_fade;
+                         
+                         // Blend clouds with sky
+                         sky_color = mix(sky_color, cloud_color, cloud_density * 0.8);
+                     }
+                     
+                     return sky_color;
+                 }
                  @vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
                      return vec4(vec2(f32(vi/2u)*4.0-1.0, f32(vi%2u)*4.0-1.0), 0.0, 1.0);
                  }
@@ -1300,7 +1397,7 @@
                      let ray_dir = normalize(scene.camera_right*((fc.x/scene.canvas_actual_dims.x)-0.5)*2.0*aspect + scene.camera_up*((fc.y/scene.canvas_actual_dims.y)-0.5)*-2.0 + cam_fwd*scene.camera_zoom);
                      let t_bounds = intersect_aabb(scene.camera_position, ray_dir, vec3(0.0), vec3(f32(GRID_DIM)));
 
-                     var sky_color = mix(vec3(0.1, 0.1, 0.2), vec3(0.5, 0.7, 1.0), max(ray_dir.y * 0.5 + 0.5, 0.0));
+                     var sky_color = compute_sky_color(ray_dir, scene.sun_direction, f32(tool_info.frame_num));
                      var final_color = vec4(sky_color, 1.0);
 
                      var dda_hit_this_ray = false;

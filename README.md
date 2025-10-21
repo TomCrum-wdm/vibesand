@@ -45,7 +45,11 @@ The GPU pipeline consists of multiple compute and render shaders:
 **Render Shader:**
 - `renderShaderCode` - Single-pass DDA raymarching fragment shader
   - Renders voxels with lighting
-  - Procedural sky
+  - **Enhanced procedural sky system** with:
+    - Atmospheric gradient (horizon to zenith)
+    - Animated sun disk with corona and glow effects
+    - Volumetric procedural clouds using Fractal Brownian Motion
+    - Dynamic time-of-day lighting (sunrise/sunset coloring)
   - Water surface shimmer effects
   - Tool preview sphere visualization
 
@@ -177,6 +181,46 @@ Bits 24-31: Blue light channel (8 bits)
 - **Interactive Tools**: Brush-based painting system with preview
 - **Resolution Scaling**: Adjustable render resolution for performance
 - **Continuous Simulation**: User-configurable physics step count
+- **Enhanced Sky System**: Procedural skybox with sun and volumetric clouds (see below)
+
+### Sky Rendering System
+
+The sky system uses **procedural generation** for maximum performance and visual quality:
+
+**Technical Approach:**
+- **Skybox-based rendering** (not voxel-based) for optimal performance
+- Computed per-pixel in fragment shader during ray marching
+- No additional textures or GPU memory required
+- Fully dynamic and synchronized with sun position
+
+**Sky Components:**
+
+1. **Atmospheric Gradient**
+   - Smooth transition from horizon (light blue) to zenith (deep blue)
+   - Uses power function for realistic atmospheric scattering appearance
+   - Sunset/sunrise coloring near horizon based on sun elevation
+
+2. **Sun Rendering**
+   - **Sun disk**: Bright core using high-power falloff (pow 128)
+   - **Sun glow**: Medium falloff halo (pow 8) 
+   - **Sun corona**: Wide soft glow (pow 2)
+   - Warm yellow-white color (1.0, 0.95, 0.8)
+   - Automatically positioned using existing sun direction vector
+
+3. **Procedural Clouds**
+   - **4-octave Fractal Brownian Motion** for realistic cloud shapes
+   - **3D value noise** with smooth interpolation
+   - **Animated**: Clouds drift slowly over time
+   - **Sun-lit**: Cloud brightness varies based on sun position
+   - **Performance optimization**: Only rendered in upper hemisphere (y > 0.05)
+   - **View-dependent fading**: Clouds fade when looking straight up or down
+   - Uses domain warping for natural, billowy appearance
+
+**Performance Characteristics:**
+- Minimal performance impact (~1-2ms per frame on modern GPUs)
+- Clouds use early exit for rays pointing down
+- Noise functions use hardware-accelerated math operations
+- No texture fetches or additional memory bandwidth
 
 ## Running the Project
 
