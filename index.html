@@ -7,84 +7,533 @@
       <title>VibeSand - Ultimate GPU Playground</title>
       <style>
          :root {
-         --base-padding: 10px;
-         --toggle-button-height: 2.5rem;
-         --accent-color: #00aaff;
-         --panel-bg-color: rgba(40, 45, 55, 0.95);
-         --text-color-light: #ffffff;
-         --text-color-muted: #b0b0b0;
-         --info-color: #40d0ff;
-         --highlight-color: #ffae5a;
-         --border-radius: 0.3rem;
-         --box-shadow: 0 0.2rem 0.8rem rgba(0, 0, 0, 0.3);
-         --box-shadow-light: 0 0.1rem 0.4rem rgba(0, 0, 0, 0.2);
-         --transition-speed: 0.3s;
+         --base-padding: 16px;
+         --accent-color: #00d4ff;
+         --accent-glow: rgba(0, 212, 255, 0.3);
+         --glass-bg: rgba(15, 20, 30, 0.65);
+         --glass-border: rgba(255, 255, 255, 0.12);
+         --text-primary: #ffffff;
+         --text-secondary: #a8b4c0;
+         --text-muted: #6b7785;
+         --border-radius: 12px;
+         --border-radius-sm: 8px;
+         --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
          }
-         html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background-color: #1a1a2e; font-family: sans-serif; color: white; font-size: 16px; }
-         #canvas-container { width: 100%; height: 100%; display: block; position: relative; }
-         canvas { display: block; width: 100%; height: 100%; background-color: #0d0d1a; cursor: crosshair; }
-         #info {
-         position: absolute; top: calc(var(--base-padding) + var(--toggle-button-height) + var(--base-padding));
-         left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 0.9em; z-index: 50; line-height: 1.6;
+         
+         * { box-sizing: border-box; }
+         
+         html, body { 
+            width: 100%; 
+            height: 100%; 
+            margin: 0; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #0a0e1a 0%, #1a1a2e 50%, #16213e 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: var(--text-primary);
+            font-size: 14px;
          }
-         #info button, #info select, #info input[type="range"] { margin-top: 5px; padding: 3px 6px; margin-right: 5px; background-color: #333; color: #fff; border: 1px solid #555; border-radius:var(--border-radius); }
-         #info .tool-buttons button.active { background-color: #4CAF50; color: white; border: 1px solid #3e8e41; }
-         #info label { display: block; margin-top: 8px; }
-         #info input[type="range"] { width: 100px; vertical-align: middle; margin-left: 5px;}
-         #info input[type="checkbox"] { vertical-align: middle; margin-right: 5px;}
-         #instructions { position: fixed; bottom: 10px; left: 10px; right: 10px; text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 0.9em; z-index: 40;}
-         #firstPersonHUD { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; pointer-events: none; z-index: 60; }
-         #firstPersonHUD::before, #firstPersonHUD::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.8); }
-         #firstPersonHUD::before { width: 2px; height: 20px; left: 9px; top: 0; }
-         #firstPersonHUD::after { width: 20px; height: 2px; left: 0; top: 9px; }
-         .info-toggle-button {
-         position: fixed; top: var(--base-padding); left: var(--base-padding);
-         background-color: rgba(50, 50, 55, 0.8); color: var(--text-color-light);
-         border: 1px solid rgba(255, 255, 255, 0.15); padding: 0.5rem 1rem;
-         border-radius: var(--border-radius); cursor: pointer; z-index: 102;
-         font-size: 0.85em; transition: all var(--transition-speed) ease;
-         backdrop-filter: blur(4px); box-shadow: var(--box-shadow-light);
-         font-family: var(--font-family); line-height: 1.3; height: var(--toggle-button-height);
-         box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+         
+         #canvas-container { 
+            width: 100%; 
+            height: 100%; 
+            display: block; 
+            position: relative; 
          }
-         .info-toggle-button:hover { background-color: rgba(70, 70, 75, 0.9); box-shadow: 0 0.15rem 0.5rem rgba(0, 0, 0, 0.3); }
+         
+         canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%; 
+            background-color: #0d0d1a; 
+            cursor: crosshair; 
+         }
+         
+         /* Frosted Glass Panel Base */
+         .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--border-radius);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
+                        0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+         }
+         
+         /* Control Panel - Responsive Layout */
+         #controlPanel {
+            position: fixed;
+            z-index: 100;
+            transition: var(--transition);
+            padding: 20px;
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+         }
+         
+         #controlPanel::-webkit-scrollbar {
+            width: 6px;
+         }
+         
+         #controlPanel::-webkit-scrollbar-track {
+            background: transparent;
+         }
+         
+         #controlPanel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+         }
+         
+         #controlPanel::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+         }
+         
+         /* Landscape: Sidebar on left */
+         @media (orientation: landscape) {
+            #controlPanel {
+               top: 16px;
+               left: 16px;
+               width: 280px;
+               max-height: calc(100vh - 32px);
+            }
+         }
+         
+         /* Portrait: Bottom bar */
+         @media (orientation: portrait) {
+            #controlPanel {
+               bottom: 16px;
+               left: 16px;
+               right: 16px;
+               width: auto;
+               max-height: 45vh;
+            }
+         }
+         
+         /* Panel Header */
+         .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--glass-border);
+         }
+         
+         .panel-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+         }
+         
+         .stats-display {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+         }
+         
+         .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+         }
+         
+         .stat-label {
+            color: var(--text-muted);
+         }
+         
+         /* Control Sections */
+         .control-section {
+            margin-bottom: 20px;
+         }
+         
+         .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+         }
+         
+         /* Button Groups */
+         .button-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+         }
+         
+         .glass-button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            padding: 8px 14px;
+            border-radius: var(--border-radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+            flex: 1;
+            min-width: fit-content;
+         }
+         
+         .glass-button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+         }
+         
+         .glass-button.active {
+            background: linear-gradient(135deg, var(--accent-color), #0099cc);
+            border-color: var(--accent-color);
+            color: white;
+            box-shadow: 0 4px 12px var(--accent-glow);
+         }
+         
+         .glass-button.active:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px var(--accent-glow);
+         }
+         
+         /* Slider Controls */
+         .slider-control {
+            margin-bottom: 14px;
+         }
+         
+         .slider-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+         }
+         
+         .slider-value {
+            font-weight: 600;
+            color: var(--accent-color);
+            font-size: 12px;
+         }
+         
+         input[type="range"] {
+            width: 100%;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+         }
+         
+         input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            box-shadow: 0 2px 8px var(--accent-glow);
+            transition: var(--transition);
+         }
+         
+         input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 4px 12px var(--accent-glow);
+         }
+         
+         input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 8px var(--accent-glow);
+            transition: var(--transition);
+         }
+         
+         input[type="range"]::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 4px 12px var(--accent-glow);
+         }
+         
+         /* Select Dropdown */
+         select {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--border-radius-sm);
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+         }
+         
+         select:hover, select:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--accent-color);
+            outline: none;
+         }
+         
+         /* Checkbox */
+         .checkbox-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            cursor: pointer;
+            user-select: none;
+         }
+         
+         .checkbox-control input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent-color);
+         }
+         
+         .checkbox-control label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            flex: 1;
+         }
+         
+         /* Info Toggle Button */
+         #infoToggleButton {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 101;
+            padding: 10px 16px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--border-radius-sm);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+         }
+         
+         #infoToggleButton:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+         }
+         
+         /* Info Panel */
          #descriptionArea {
-         position: absolute;
-         top: calc(var(--base-padding) * 2 + var(--toggle-button-height));
-         left: var(--base-padding);
-         width: clamp(380px, 30vw, 520px);
-         max-height: calc(100vh - (var(--base-padding) * 3 + var(--toggle-button-height)) - 50px);
-         background: var(--panel-bg-color);
-         padding: 1.2rem 1.5rem; box-sizing: border-box;
-         border-radius: var(--border-radius); border: 1px solid rgba(255, 255, 255, 0.1);
-         z-index: 100; pointer-events: auto; font-size: 0.85em;
-         overflow-y: auto; box-shadow: var(--box-shadow); line-height: 1.65;
-         opacity: 1; visibility: visible; transform: translateY(0%);
-         transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility 0s linear 0s;
+            position: fixed;
+            top: 60px;
+            right: 16px;
+            width: min(400px, calc(100vw - 32px));
+            max-height: calc(100vh - 92px);
+            padding: 24px;
+            z-index: 100;
+            overflow-y: auto;
+            transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s linear 0s;
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
          }
+         
+         #descriptionArea::-webkit-scrollbar {
+            width: 6px;
+         }
+         
+         #descriptionArea::-webkit-scrollbar-track {
+            background: transparent;
+         }
+         
+         #descriptionArea::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+         }
+         
          #descriptionArea.hidden {
-         opacity: 0 !important;
-         transform: translateY(-20px);
-         visibility: hidden !important; pointer-events: none !important;
-         transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility 0s linear var(--transition-speed);
+            opacity: 0;
+            transform: translateY(-20px);
+            visibility: hidden;
+            transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s linear 0.3s;
          }
-         #descriptionArea h2 { margin-top: 0; margin-bottom: 0.8rem; color: var(--info-color); text-align: left; font-weight: 600; font-size: 1.2em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.4em;}
-         #descriptionArea h4 { margin-top: 1em; margin-bottom: 0.5rem; color: var(--highlight-color); font-weight: 600; font-size: 1em; }
-         #descriptionArea p, #descriptionArea ul { margin-bottom: 0.8rem; color: var(--text-color-muted); }
-         #descriptionArea ul { list-style: disc; padding-left: 1.4rem; margin-top:0.2em; }
-         #descriptionArea li { margin-bottom: 0.4rem; }
-         #descriptionArea code { background-color: rgba(0,0,0,0.3); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; color: var(--highlight-color); font-family: 'Consolas', 'Courier New', monospace; }
-         #descriptionArea a { color: var(--accent-color); text-decoration: none; }
-         #descriptionArea a:hover { text-decoration: underline; }
-         .credits { font-size: 0.9em; text-align: center; margin-top: 1.5rem; color: #888; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.8rem; }
+         
+         #descriptionArea h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--accent-color);
+         }
+         
+         #descriptionArea h4 {
+            margin: 16px 0 8px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+         }
+         
+         #descriptionArea p {
+            margin: 0 0 12px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+         }
+         
+         #descriptionArea ul {
+            margin: 0 0 12px 0;
+            padding-left: 20px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+         }
+         
+         #descriptionArea li {
+            margin-bottom: 6px;
+         }
+         
+         #descriptionArea code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            color: var(--accent-color);
+         }
+         
+         #descriptionArea a {
+            color: var(--accent-color);
+            text-decoration: none;
+            transition: var(--transition);
+         }
+         
+         #descriptionArea a:hover {
+            text-decoration: underline;
+         }
+         
+         .credits {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--glass-border);
+            font-size: 12px;
+            text-align: center;
+            color: var(--text-muted);
+         }
+         
+         /* Instructions */
+         #instructions {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--border-radius-sm);
+            font-size: 12px;
+            color: var(--text-secondary);
+            z-index: 40;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            white-space: nowrap;
+         }
+         
+         @media (orientation: portrait) {
+            #instructions {
+               bottom: auto;
+               top: 16px;
+               left: 50%;
+            }
+         }
+         
+         /* First Person HUD */
+         #firstPersonHUD {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+            z-index: 60;
+         }
+         
+         #firstPersonHUD::before,
+         #firstPersonHUD::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+         }
+         
+         #firstPersonHUD::before {
+            width: 2px;
+            height: 20px;
+            left: 9px;
+            top: 0;
+         }
+         
+         #firstPersonHUD::after {
+            width: 20px;
+            height: 2px;
+            left: 0;
+            top: 9px;
+         }
+         
+         /* Responsive adjustments */
+         @media (max-width: 768px) {
+            #controlPanel {
+               padding: 16px;
+            }
+            
+            .button-group {
+               gap: 6px;
+            }
+            
+            .glass-button {
+               padding: 7px 12px;
+               font-size: 12px;
+            }
+            
+            @media (orientation: landscape) {
+               #controlPanel {
+                  width: 240px;
+               }
+            }
+         }
+         
+         @media (max-width: 480px) {
+            #descriptionArea {
+               width: calc(100vw - 32px);
+            }
+            
+            @media (orientation: portrait) {
+               #controlPanel {
+                  max-height: 50vh;
+               }
+            }
+         }
       </style>
    </head>
    <body>
-      <button id="infoToggleButton" class="info-toggle-button">Hide Info</button>
-      <div id="descriptionArea">
-         <h2>VibeSand 0.2 - Water, lights, and speed update!</h2>
-         <p style="font-size: 0.9em; color: var(--text-color-muted); margin-top:-0.5em; margin-bottom:1em;">GPU-Powered Voxel Playground</p>
-         <p style="color: var(--highlight-color); font-weight: bold; margin-bottom: 1em;">Performance Tip: Use 'Render Scale' in UI if slow</p>
+      <button id="infoToggleButton">ℹ️ Info</button>
+      <div id="descriptionArea" class="glass-panel">
+         <h2>VibeSand 0.2</h2>
+         <p style="font-size: 12px; margin-top: -4px; margin-bottom: 16px;">GPU-Powered Voxel Playground</p>
+         <p style="color: var(--accent-color); font-weight: 600; margin-bottom: 12px;">💡 Performance Tip: Adjust Render Scale if slow</p>
          <p><strong>VibeSand</strong> is a WebGPU voxel engine. It simulates millions of particles entirely on your GPU. Watch sand form natural piles, water fill basins and flow over edges, and sculpt the world in real time, all illuminated by dynamic lights.</p>
          <h4>Things to Try:</h4>
          <ul style="font-size: 0.9em;">
@@ -97,141 +546,157 @@
             <li>Build dams; see how water pressure affects flow when you release it.</li>
          </ul>
          <h4>Key Features</h4>
-         <ul>
-            <li><strong>Dynamic Particles & Lighting:</strong> Sand slides and tumbles naturally. Water spreads via a 2-cell pressure check, tumbles over edges, and features an enhanced surface shimmer and internal brightness. The scene is illuminated by a "rain" of dynamic, colorful point lights.</li>
-            <li><strong>Full GPU Pipeline:</strong> Physics, tool targeting, lighting, and rendering all run as GPU shaders for maximum performance.</li>
-            <li><strong>Instant Voxel Tools:</strong> Sculpt with sand, stone, water, or erase. Clear visual previews guide your actions.</li>
-            <li><strong>Single-Pass Ubershader:</strong> A DDA raymarching fragment shader renders everything in one go: voxels, dynamic lighting, procedural sky, tool highlights, and water shimmer.</li>
+         <ul style="font-size: 12px;">
+            <li><strong>Dynamic Particles & Lighting:</strong> Sand slides naturally, water flows with enhanced shimmer, illuminated by colorful point lights</li>
+            <li><strong>Full GPU Pipeline:</strong> Physics, targeting, lighting, and rendering all run on GPU shaders</li>
+            <li><strong>Interactive Tools:</strong> Sculpt with sand, stone, water, or erase with clear visual previews</li>
+            <li><strong>Single-Pass Rendering:</strong> DDA raymarching renders everything in one go</li>
          </ul>
          <h4>Controls</h4>
-         <ul>
-            <li><strong>Camera Modes:</strong> Switch between Orbital (default) and First Person modes in the UI panel.</li>
-            <li><strong>Orbital Mode:</strong>
-               <ul>
-                  <li><strong>Left Click:</strong> Use selected tool.</li>
-                  <li><strong>Right Click + Drag:</strong> Orbit camera.</li>
-                  <li><strong>Middle Mouse / Space + Left Click + Drag:</strong> Pan camera.</li>
-                  <li><strong>Mouse Wheel:</strong> Zoom.</li>
-               </ul>
-            </li>
-            <li><strong>First Person Mode:</strong>
-               <ul>
-                  <li><strong>WASD:</strong> Move forward/left/backward/right.</li>
-                  <li><strong>Space:</strong> Move up.</li>
-                  <li><strong>Shift:</strong> Move down.</li>
-                  <li><strong>Mouse:</strong> Look around (click to lock cursor).</li>
-                  <li><strong>Left Click:</strong> Use selected tool at crosshair.</li>
-               </ul>
-            </li>
-         </ul>
-         <h4 style="margin-top:1.5em;">Under the Hood</h4>
-         <ul>
-            <li><strong>Bit-Packed Voxels:</strong> Each voxel's state (type, color variant, physics status, RGB light) is stored in a single <code>u32</code>.</li>
-            <li><strong>Single-Buffer Physics:</strong> Simulation uses one data buffer. An "updated" flag per voxel ensures stability during multi-step physics iterations.</li>
-            <li>
-               <strong>Multi-Pass Compute Architecture:</strong>
-               <ul>
-                  <li><strong>Targeting:</strong> A GPU compute shader raycasts to find the cursor's 3D position. No CPU readback is involved. Its raymarch loop respects the <code>Max Ray Steps</code>.</li>
-                  <li><strong>Physics Simulation:</strong> Particle interactions like gravity, sliding, tumbling, and fluid spread are processed in-place on the single buffer.</li>
-                  <li><strong>Tool Application:</strong> Voxel data is modified by tools after all physics steps for the frame are complete.</li>
-                  <li><strong>Dynamic Lighting:</strong> Light contributions from a configurable number of moving point sources (the "light rain") are calculated and packed into each voxel's <code>u32</code>.</li>
-               </ul>
-            </li>
-            <li><strong>Optimized Ubershader Rendering:</strong> The DDA raymarcher, implemented as a single comprehensive fragment shader, renders the scene. It uses a precise ray start bias to prevent visual artifacts, respects the <code>Max Ray Steps</code>, and integrates all visual elements including enhanced water rendering in one pass.</li>
-         </ul>
-         <h4 style="margin-top:1.5em;">Future Ideas & Roadmap</h4>
-         <ul style="font-size: 0.9em;">
-             <li><strong>Reactive Elements:</strong> Gunpowder that ignites from fire, with potential for small explosions.</li>
-            <li>
-               <strong>Interactive Light Sources:</strong>
-               <ul>
-                  <li>Lights attached to dynamic events like Bombs, Blasters, and Meteors.</li>
-                  <li>Option for the mouse cursor/tool to act as a controllable light source.</li>
-               </ul>
-            </li>
-            <li>
-               <strong>Performance Enhancements:</strong>
-               <ul>
-                  <li>Automatic resolution scaling based on target FPS.</li>
-                  <li>Further compute shader optimizations.</li>
-               </ul>
-            </li>
-            <li><strong>Destructive Events:</strong> Tools like Bombs, Blasters, and Meteors (beyond just their lighting).</li>
-            <li><strong>Advanced Erosion:</strong> Rain tool carving terrain; water currents displacing sand; wind effects.</li>
-            <li><strong>✓ First-Person Controller:</strong> COMPLETE - Immersive exploration with WASD movement, mouse look, and vertical controls.</li>
-            <li><strong>World Scalability:</strong> Chunking systems and sparse voxel techniques (e.g., Brickmaps).</li>
-            <li>Further refinement of particle interactions and fluid dynamics.</li>
-            <li>Staggered CPU Readback for Voxel Type Counts (e.g., 50k Stone, 1M Water, 500k Sand).</li>
+         <ul style="font-size: 12px;">
+            <li><strong>Orbital Mode:</strong> Right-click to orbit, Middle/Space+Left to pan, Wheel to zoom</li>
+            <li><strong>First Person Mode:</strong> WASD to move, Space/Shift for up/down, Mouse to look</li>
          </ul>
          <p class="credits">
             Vibecoded <span id="currentDate"></span> by
-            <a href="https://tront.xyz" target="_blank" rel="noopener noreferrer">Trent Sterling</a> &amp; AI Assistant (Gemini 2.5 Pro).
-         </p>
-         <p class="credits" style="font-size:0.8em; margin-top:0.2em;">
-            <a href="https://blog.tront.xyz" target="_blank" rel="noopener noreferrer">blog.tront.xyz</a>
+            <a href="https://tront.xyz" target="_blank">Trent Sterling</a> & AI
          </p>
       </div>
-      <div id="info">
-         <p>Voxels: <span id="voxelCount"></span></p>
-         <p>FPS: <span id="fps"></span></p>
-         <button id="resetSimButton">Reset Sim</button>
-         <div class="tool-buttons" style="margin-top: 10px;">
-            World Type: <button id="worldTypeTerrain" class="active">Terrain</button> <button id="worldTypeFlat">Flat</button>
+      
+      <div id="controlPanel" class="glass-panel">
+         <div class="panel-header">
+            <div class="panel-title">
+               🎮 VibeSand
+            </div>
+            <div class="stats-display">
+               <div class="stat-item">
+                  <span class="stat-label">FPS:</span>
+                  <span id="fps">0</span>
+               </div>
+               <div class="stat-item">
+                  <span class="stat-label">Voxels:</span>
+                  <span id="voxelCount">0</span>
+               </div>
+            </div>
          </div>
-         <button id="clearLooseButton">Clear Loose</button>
-         <div class="tool-buttons" style="margin-top: 10px;">
-            Paint Tool:
-            <button id="toolPaintSand" class="active">Sand</button>
-            <button id="toolPaintStone">Stone</button>
-            <button id="toolPaintWater">Water</button>
-            <button id="toolDestroy">Destroy</button>
+         
+         <div class="control-section">
+            <div class="section-title">World</div>
+            <div class="button-group">
+               <button id="worldTypeTerrain" class="glass-button active">🏔️ Terrain</button>
+               <button id="worldTypeFlat" class="glass-button">⬜ Flat</button>
+            </div>
+            <div class="button-group" style="margin-top: 8px;">
+               <button id="resetSimButton" class="glass-button" style="flex: 2;">🔄 Reset</button>
+               <button id="clearLooseButton" class="glass-button" style="flex: 1;">🧹 Clear</button>
+            </div>
          </div>
-         <div>
-            <label for="sunSpeed">Sun Speed: <span id="sunSpeedValue">0.0200</span></label>
-            <input type="range" id="sunSpeed" min="0" max="0.02" step="0.0001" value="0.02">
+         
+         <div class="control-section">
+            <div class="section-title">Tool</div>
+            <div class="button-group">
+               <button id="toolPaintSand" class="glass-button active">🏖️ Sand</button>
+               <button id="toolPaintStone" class="glass-button">🪨 Stone</button>
+            </div>
+            <div class="button-group" style="margin-top: 8px;">
+               <button id="toolPaintWater" class="glass-button">💧 Water</button>
+               <button id="toolDestroy" class="glass-button">💥 Destroy</button>
+            </div>
          </div>
-         <div>
-            <label for="brushSize">Brush Size: <span id="brushSizeValue">10.5</span></label>
-            <input type="range" id="brushSize" min="1" max="25" step="0.5" value="10.5">
+         
+         <div class="control-section">
+            <div class="section-title">Brush</div>
+            <div class="slider-control">
+               <div class="slider-label">
+                  <span>Size</span>
+                  <span class="slider-value" id="brushSizeValue">10.5</span>
+               </div>
+               <input type="range" id="brushSize" min="1" max="25" step="0.5" value="10.5">
+            </div>
          </div>
-         <div>
-            <label for="simSteps">Sim Steps: <span id="simStepsValue">1</span></label>
-            <input type="range" id="simSteps" min="0" max="25" step="1" value="1">
+         
+         <div class="control-section">
+            <div class="section-title">Simulation</div>
+            <div class="slider-control">
+               <div class="slider-label">
+                  <span>Steps/Frame</span>
+                  <span class="slider-value" id="simStepsValue">1</span>
+               </div>
+               <input type="range" id="simSteps" min="0" max="25" step="1" value="1">
+            </div>
+            <div class="slider-control">
+               <div class="slider-label">
+                  <span>Sun Speed</span>
+                  <span class="slider-value" id="sunSpeedValue">0.0200</span>
+               </div>
+               <input type="range" id="sunSpeed" min="0" max="0.02" step="0.0001" value="0.02">
+            </div>
          </div>
-         <div>
-            <label for="maxRaySteps">Max Ray Steps: <span id="maxRayStepsValue">384</span></label>
-            <input type="range" id="maxRaySteps" min="64" max="384" step="32" value="384">
+         
+         <div class="control-section">
+            <div class="section-title">Rendering</div>
+            <div class="slider-control">
+               <div class="slider-label">
+                  <span>Max Ray Steps</span>
+                  <span class="slider-value" id="maxRayStepsValue">384</span>
+               </div>
+               <input type="range" id="maxRaySteps" min="64" max="384" step="32" value="384">
+            </div>
+            <div class="slider-control">
+               <div class="slider-label">
+                  <span>Render Scale</span>
+                  <span class="slider-value" id="resolutionScaleValue">100%</span>
+               </div>
+               <select id="resolutionScale">
+                  <option value="1.0">Native (100%)</option>
+                  <option value="0.75">High (75%)</option>
+                  <option value="0.5">Medium (50%)</option>
+                  <option value="0.25">Low (25%)</option>
+               </select>
+            </div>
          </div>
-         <div>
-            <label for="resolutionScale">Render Scale: <span id="resolutionScaleValue">Native</span></label>
-            <select id="resolutionScale">
-               <option value="1.0">Native (100%)</option>
-               <option value="0.75">High (75%)</option>
-               <option value="0.5">Medium (50%)</option>
-               <option value="0.25">Low (25%)</option>
-            </select>
+         
+         <div class="control-section">
+            <div class="section-title">Camera</div>
+            <div class="button-group">
+               <button id="cameraModeOrbital" class="glass-button active">🔄 Orbital</button>
+               <button id="cameraModeFirstPerson" class="glass-button">🎮 FPS</button>
+            </div>
          </div>
-         <div><label><input type="checkbox" id="continuousPaintToggle" checked>Continuous Paint</label></div>
-         <div><label><input type="checkbox" id="targetFarFaceToggle" checked>Target Far Face (on air)</label></div>
-         <div class="tool-buttons" style="margin-top: 10px;">
-            Camera Mode:
-            <button id="cameraModeOrbital" class="active">Orbital</button>
-            <button id="cameraModeFirstPerson">First Person</button>
+         
+         <div class="control-section">
+            <div class="section-title">Options</div>
+            <div class="checkbox-control">
+               <input type="checkbox" id="continuousPaintToggle" checked>
+               <label for="continuousPaintToggle">Continuous Paint</label>
+            </div>
+            <div class="checkbox-control">
+               <input type="checkbox" id="targetFarFaceToggle" checked>
+               <label for="targetFarFaceToggle">Target Far Face (on air)</label>
+            </div>
          </div>
       </div>
+      
       <div id="firstPersonHUD" style="display: none;"></div>
       <div id="canvas-container">
          <canvas id="webgpu-canvas"></canvas>
       </div>
-      <div id="instructions">DDA Voxel Renderer. <span id="orbitalInstructions">Right-click to orbit, Middle-mouse/Space+Left-click to pan.</span><span id="firstPersonInstructions" style="display:none;">WASD to move, Space/Shift for up/down, Mouse to look. Click to lock cursor.</span></div>
+      <div id="instructions">
+         <span id="orbitalInstructions">Right-click to orbit • Middle-mouse/Space+Left to pan</span>
+         <span id="firstPersonInstructions" style="display:none;">WASD to move • Space/Shift for up/down • Mouse to look • Click to lock cursor</span>
+      </div>
       <script type="module">
          // --- Start of UI elements that can be initialized without WebGPU ---
-         const infoToggleButtonElement = document.getElementById('infoToggleButton'); // Renamed to avoid conflict
-         const descriptionAreaElement = document.getElementById('descriptionArea'); // Renamed to avoid conflict
+         const infoToggleButtonElement = document.getElementById('infoToggleButton');
+         const descriptionAreaElement = document.getElementById('descriptionArea');
          if (infoToggleButtonElement && descriptionAreaElement) {
+             // Start with info panel hidden
+             descriptionAreaElement.classList.add('hidden');
+             infoToggleButtonElement.textContent = '📖 Show Info';
+             
              infoToggleButtonElement.onclick = () => {
                  descriptionAreaElement.classList.toggle('hidden');
-                 infoToggleButtonElement.textContent = descriptionAreaElement.classList.contains('hidden') ? 'Show Info' : 'Hide Info';
+                 infoToggleButtonElement.textContent = descriptionAreaElement.classList.contains('hidden') ? '📖 Show Info' : '✖️ Hide Info';
              };
          }
 
@@ -1186,9 +1651,9 @@
                    Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
                 ];
                 const right = [
-                   Math.sin(firstPersonCamera.yaw),
+                   -Math.sin(firstPersonCamera.yaw),
                    0,
-                   -Math.cos(firstPersonCamera.yaw)
+                   Math.cos(firstPersonCamera.yaw)
                 ];
                 
                 // Calculate horizontal movement (ignoring pitch for walking)
