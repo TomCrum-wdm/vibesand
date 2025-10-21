@@ -555,7 +555,7 @@
          <h4>Controls</h4>
          <ul style="font-size: 12px;">
             <li><strong>Orbital Mode:</strong> Right-click to orbit, Middle/Space+Left to pan, Wheel to zoom</li>
-            <li><strong>First Person Mode:</strong> WASD to move, Space/Shift for up/down, Mouse to look</li>
+            <li><strong>First Person Mode:</strong> WASD to move, Space to jump, Mouse to look (Physics enabled: gravity & ground collision)</li>
          </ul>
          <p class="credits">
             Vibecoded <span id="currentDate"></span> by
@@ -683,7 +683,7 @@
       </div>
       <div id="instructions">
          <span id="orbitalInstructions">Right-click to orbit • Middle-mouse/Space+Left to pan</span>
-         <span id="firstPersonInstructions" style="display:none;">WASD to move • Space/Shift for up/down • Mouse to look • Click to lock cursor</span>
+         <span id="firstPersonInstructions" style="display:none;">WASD to move • Space to jump • Mouse to look • Click to lock cursor</span>
       </div>
       <script type="module">
          // ==================================================
@@ -1051,6 +1051,11 @@
              // 范围: 0.05-0.5 | Range: 0.05-0.5
              // 更大的值 = 平移更快 | Larger value = faster panning
              const PAN_SENSITIVITY = 0.1;
+             
+             // 🧍 第一人称玩家物理参数 | First-Person Player Physics Parameters
+             const PLAYER_HEIGHT = 1.8;      // 玩家高度(体素单位) | Player height in voxel units
+             const PLAYER_RADIUS = 0.4;      // 玩家碰撞半径 | Player collision radius
+             const PLAYER_EYE_HEIGHT = 1.6;  // 眼睛高度 | Eye height from feet
 
              // 🛠️ 工具类型常量 | Tool Type Constants
              // 这些常量定义了不同的绘制工具 | These constants define different painting tools
@@ -2264,7 +2269,8 @@
                    if (e.code === 'KeyS') keyState.s = true;
                    if (e.code === 'KeyD') keyState.d = true;
                    if (e.code === 'Space') { keyState.space = true; e.preventDefault(); }
-                   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = true;
+                   // Shift is no longer used for movement in physics mode
+                   // if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = true;
                 }
              });
              window.addEventListener('keyup', (e) => {
@@ -2275,7 +2281,8 @@
                    if (e.code === 'KeyS') keyState.s = false;
                    if (e.code === 'KeyD') keyState.d = false;
                    if (e.code === 'Space') keyState.space = false;
-                   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = false;
+                   // Shift is no longer used for movement in physics mode
+                   // if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keyState.shift = false;
                 }
              });
              canvas.addEventListener('mousedown', (e) => {
@@ -2351,35 +2358,31 @@
              }
              resizeCanvasAndContext();
 
-             // Helper function to check if a voxel is solid
-             async function isVoxelSolid(x, y, z) {
+             // 🧱 Helper function to check if a voxel is solid
+             // 检查体素是否为固体(用于碰撞检测) | Check if a voxel is solid (for collision detection)
+             function isVoxelSolid(x, y, z) {
                 if (x < 0 || y < 0 || z < 0 || x >= VOXEL_GRID_SIZE || y >= VOXEL_GRID_SIZE || z >= VOXEL_GRID_SIZE) {
-                   return true; // Out of bounds is solid
+                   return true; // Out of bounds is solid (边界外视为固体)
                 }
-                const idx = Math.floor(x) + Math.floor(y) * VOXEL_GRID_SIZE + Math.floor(z) * VOXEL_GRID_SIZE * VOXEL_GRID_SIZE;
+                // 我们无法实时从GPU缓冲区读取，所以使用近似碰撞
                 // We can't easily read from GPU buffer in real-time, so we'll use approximate collision
-                // For simplicity, assume y < 32 is solid (terrain level)
+                // 假设y < 32是固体(地形高度) | Assume y < 32 is solid (terrain level)
                 return y < 32;
              }
 
-             // Update first-person camera physics
+             // 🎮 Update first-person camera with full physics engine
+             // 更新第一人称相机物理引擎 | Update first-person camera physics engine
              function updateFirstPersonCamera(deltaTime) {
                 if (cameraMode !== 'firstperson') return;
                 
-                // Calculate movement direction
-                const forward = [
-                   Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
-                   Math.sin(firstPersonCamera.pitch),
-                   Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
-                ];
-                const right = [
-                   -Math.sin(firstPersonCamera.yaw),
-                   0,
-                   Math.cos(firstPersonCamera.yaw)
-                ];
+                const camera = firstPersonCamera;
+                const playerHeight = camera.height;
+                const playerRadius = 0.4; // 玩家碰撞半径 | Player collision radius
                 
-                // Calculate horizontal movement (ignoring pitch for walking)
-                const forwardH = [Math.cos(firstPersonCamera.yaw), 0, Math.sin(firstPersonCamera.yaw)];
+                // 🚶 Calculate horizontal movement direction (ignoring pitch for walking)
+                // 计算水平移动方向(忽略俯仰角，只用于行走) | Calculate horizontal movement direction
+                const forwardH = [Math.cos(camera.yaw), 0, Math.sin(camera.yaw)];
+                const right = [-Math.sin(camera.yaw), 0, Math.cos(camera.yaw)];
                 
                 let moveX = 0, moveZ = 0;
                 if (keyState.w) { moveX += forwardH[0]; moveZ += forwardH[2]; }
@@ -2387,35 +2390,95 @@
                 if (keyState.a) { moveX -= right[0]; moveZ -= right[2]; }
                 if (keyState.d) { moveX += right[0]; moveZ += right[2]; }
                 
-                // Normalize movement
+                // Normalize horizontal movement (归一化水平移动)
                 const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
                 if (moveLen > 0) {
                    moveX /= moveLen;
                    moveZ /= moveLen;
                 }
                 
-                // Apply movement
-                const speed = firstPersonCamera.speed;
-                let newX = firstPersonCamera.position[0] + moveX * speed * deltaTime;
-                let newZ = firstPersonCamera.position[2] + moveZ * speed * deltaTime;
+                // 🏃 Apply horizontal movement with collision detection
+                // 应用水平移动并进行碰撞检测 | Apply horizontal movement with collision detection
+                const speed = camera.speed;
+                const desiredX = camera.position[0] + moveX * speed * deltaTime;
+                const desiredZ = camera.position[2] + moveZ * speed * deltaTime;
                 
-                // Simple collision: check if new position is in bounds
+                // Check collision for horizontal movement (检查水平移动碰撞)
+                // Check at foot level and waist level (检查脚部和腰部位置)
+                const footY = Math.floor(camera.position[1]);
+                const waistY = Math.floor(camera.position[1] + playerHeight * 0.5);
+                
+                let newX = desiredX;
+                let newZ = desiredZ;
+                
+                // X-axis collision (X轴碰撞检测)
+                const checkX = Math.floor(desiredX);
+                const checkZ = Math.floor(camera.position[2]);
+                if (isVoxelSolid(checkX, footY, checkZ) || isVoxelSolid(checkX, waistY, checkZ) || isVoxelSolid(checkX, footY + 1, checkZ)) {
+                   newX = camera.position[0];
+                }
+                
+                // Z-axis collision (Z轴碰撞检测)
+                const checkX2 = Math.floor(camera.position[0]);
+                const checkZ2 = Math.floor(desiredZ);
+                if (isVoxelSolid(checkX2, footY, checkZ2) || isVoxelSolid(checkX2, waistY, checkZ2) || isVoxelSolid(checkX2, footY + 1, checkZ2)) {
+                   newZ = camera.position[2];
+                }
+                
+                // Keep within world bounds (保持在世界边界内)
                 newX = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newX));
                 newZ = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newZ));
                 
-                firstPersonCamera.position[0] = newX;
-                firstPersonCamera.position[2] = newZ;
+                camera.position[0] = newX;
+                camera.position[2] = newZ;
                 
-                // Vertical movement (simple: space goes up, shift goes down)
-                if (keyState.space) {
-                   firstPersonCamera.position[1] += speed * deltaTime;
-                }
-                if (keyState.shift) {
-                   firstPersonCamera.position[1] -= speed * deltaTime;
+                // ⬇️ Apply gravity to vertical velocity
+                // 对垂直速度应用重力 | Apply gravity to vertical velocity
+                camera.velocity[1] += camera.gravity * deltaTime;
+                
+                // 📍 Check ground collision (检查地面碰撞)
+                const desiredY = camera.position[1] + camera.velocity[1] * deltaTime;
+                const feetY = Math.floor(desiredY);
+                const feetCheckX = Math.floor(camera.position[0]);
+                const feetCheckZ = Math.floor(camera.position[2]);
+                
+                // Check if standing on solid ground (检查是否站在固体地面上)
+                const onGround = isVoxelSolid(feetCheckX, feetY - 1, feetCheckZ);
+                
+                if (onGround && camera.velocity[1] < 0) {
+                   // 着陆: 停止下落并对齐到地面 | Landing: stop falling and align to ground
+                   camera.position[1] = Math.floor(camera.position[1]) + 1.0;
+                   camera.velocity[1] = 0;
+                   camera.isGrounded = true;
+                } else if (desiredY < 1) {
+                   // Hit bottom of world (触碰世界底部)
+                   camera.position[1] = 1;
+                   camera.velocity[1] = 0;
+                   camera.isGrounded = true;
+                } else {
+                   // Check ceiling collision (检查天花板碰撞)
+                   const headY = Math.floor(desiredY + playerHeight);
+                   if (isVoxelSolid(feetCheckX, headY, feetCheckZ) && camera.velocity[1] > 0) {
+                      // Hit ceiling (撞到天花板)
+                      camera.velocity[1] = 0;
+                      camera.position[1] = Math.floor(camera.position[1] + playerHeight) - playerHeight;
+                   } else {
+                      // Normal movement (正常移动)
+                      camera.position[1] = desiredY;
+                      camera.isGrounded = false;
+                   }
                 }
                 
-                // Keep within bounds
-                firstPersonCamera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, firstPersonCamera.position[1]));
+                // 🦘 Jump mechanic (跳跃机制)
+                // Press space to jump (only when grounded)
+                // 按空格键跳跃(仅在地面上时) | Press space to jump (only when grounded)
+                if (keyState.space && camera.isGrounded) {
+                   camera.velocity[1] = camera.jumpVelocity;
+                   camera.isGrounded = false;
+                }
+                
+                // Keep within world bounds (保持在世界边界内)
+                camera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[1]));
              }
 
              let lastFrameTime = performance.now();
