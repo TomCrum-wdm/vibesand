@@ -2564,8 +2564,7 @@
                        Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
                     ];
                     
-                    const wUp = [0, 1, 0];  // 世界向上向量 | World up vector
-                    // 计算右向量(叉乘) | Calculate right vector (cross product)
+                    // 计算右向量(直接从yaw角度计算) | Calculate right vector (directly from yaw angle)
                     currentRight = [
                        Math.sin(firstPersonCamera.yaw),
                        0,
