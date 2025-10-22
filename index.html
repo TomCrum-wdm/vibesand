@@ -555,7 +555,7 @@
          <h4>Controls</h4>
          <ul style="font-size: 12px;">
             <li><strong>Orbital Mode:</strong> Right-click to orbit, Middle/Space+Left to pan, Wheel to zoom</li>
-            <li><strong>First Person Mode:</strong> WASD to move, Space to jump, Mouse to look (Physics enabled: gravity & ground collision)</li>
+            <li><strong>First Person Mode:</strong> WASD to move, Space to move up, Mouse to look (Noclip mode - collision via player voxel)</li>
          </ul>
          <p class="credits">
             Vibecoded <span id="currentDate"></span> by
@@ -2397,127 +2397,45 @@
              }
              resizeCanvasAndContext();
 
-             // 🧱 Helper function to check if a voxel is solid
-             // 检查体素是否为固体(用于碰撞检测) | Check if a voxel is solid (for collision detection)
-             function isVoxelSolid(x, y, z) {
-                if (x < 0 || y < 0 || z < 0 || x >= VOXEL_GRID_SIZE || y >= VOXEL_GRID_SIZE || z >= VOXEL_GRID_SIZE) {
-                   return true; // Out of bounds is solid (边界外视为固体)
-                }
-                // 我们无法实时从GPU缓冲区读取，所以使用近似碰撞
-                // We can't easily read from GPU buffer in real-time, so we'll use approximate collision
-                // 假设y < 32是固体(地形高度) | Assume y < 32 is solid (terrain level)
-                return y < 32;
-             }
-
-             // 🎮 Update first-person camera with full physics engine
-             // 更新第一人称相机物理引擎 | Update first-person camera physics engine
-             function updateFirstPersonCamera(deltaTime) {
+            // 🎮 Update first-person camera - simplified without CPU collision
+            // 更新第一人称相机 - 简化版，无CPU碰撞检测 | Update first-person camera - simplified without CPU collision
+            // 玩家碰撞由GPU物理系统通过玩家体素处理 | Player collision handled by GPU physics via player voxel
+            function updateFirstPersonCamera(deltaTime) {
                 if (cameraMode !== 'firstperson') return;
                 
                 const camera = firstPersonCamera;
-                const playerHeight = camera.height;
-                const playerRadius = 0.4; // 玩家碰撞半径 | Player collision radius
                 
-                // 🚶 Calculate horizontal movement direction (ignoring pitch for walking)
-                // 计算水平移动方向(忽略俯仰角，只用于行走) | Calculate horizontal movement direction
+                // 🚶 Calculate movement direction
+                // 计算移动方向 | Calculate movement direction
                 const forwardH = [Math.cos(camera.yaw), 0, Math.sin(camera.yaw)];
                 const right = [-Math.sin(camera.yaw), 0, Math.cos(camera.yaw)];
                 
-                let moveX = 0, moveZ = 0;
+                let moveX = 0, moveY = 0, moveZ = 0;
                 if (keyState.w) { moveX += forwardH[0]; moveZ += forwardH[2]; }
                 if (keyState.s) { moveX -= forwardH[0]; moveZ -= forwardH[2]; }
                 if (keyState.a) { moveX -= right[0]; moveZ -= right[2]; }
                 if (keyState.d) { moveX += right[0]; moveZ += right[2]; }
+                if (keyState.space) { moveY += 1; }  // Move up
                 
-                // Normalize horizontal movement (归一化水平移动)
-                const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+                // Normalize movement (归一化移动)
+                const moveLen = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
                 if (moveLen > 0) {
                    moveX /= moveLen;
+                   moveY /= moveLen;
                    moveZ /= moveLen;
                 }
                 
-                // 🏃 Apply horizontal movement with collision detection
-                // 应用水平移动并进行碰撞检测 | Apply horizontal movement with collision detection
+                // Apply movement without collision detection
+                // 应用移动(无碰撞检测) | Apply movement (no collision detection)
                 const speed = camera.speed;
-                const desiredX = camera.position[0] + moveX * speed * deltaTime;
-                const desiredZ = camera.position[2] + moveZ * speed * deltaTime;
-                
-                // Check collision for horizontal movement (检查水平移动碰撞)
-                // Check at foot level and waist level (检查脚部和腰部位置)
-                const footY = Math.floor(camera.position[1]);
-                const waistY = Math.floor(camera.position[1] + playerHeight * 0.5);
-                
-                let newX = desiredX;
-                let newZ = desiredZ;
-                
-                // X-axis collision (X轴碰撞检测)
-                const checkX = Math.floor(desiredX);
-                const checkZ = Math.floor(camera.position[2]);
-                if (isVoxelSolid(checkX, footY, checkZ) || isVoxelSolid(checkX, waistY, checkZ) || isVoxelSolid(checkX, footY + 1, checkZ)) {
-                   newX = camera.position[0];
-                }
-                
-                // Z-axis collision (Z轴碰撞检测)
-                const checkX2 = Math.floor(camera.position[0]);
-                const checkZ2 = Math.floor(desiredZ);
-                if (isVoxelSolid(checkX2, footY, checkZ2) || isVoxelSolid(checkX2, waistY, checkZ2) || isVoxelSolid(checkX2, footY + 1, checkZ2)) {
-                   newZ = camera.position[2];
-                }
+                camera.position[0] += moveX * speed * deltaTime;
+                camera.position[1] += moveY * speed * deltaTime;
+                camera.position[2] += moveZ * speed * deltaTime;
                 
                 // Keep within world bounds (保持在世界边界内)
-                newX = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newX));
-                newZ = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newZ));
-                
-                camera.position[0] = newX;
-                camera.position[2] = newZ;
-                
-                // ⬇️ Apply gravity to vertical velocity
-                // 对垂直速度应用重力 | Apply gravity to vertical velocity
-                camera.velocity[1] += camera.gravity * deltaTime;
-                
-                // 📍 Check ground collision (检查地面碰撞)
-                const desiredY = camera.position[1] + camera.velocity[1] * deltaTime;
-                const feetY = Math.floor(desiredY);
-                const feetCheckX = Math.floor(camera.position[0]);
-                const feetCheckZ = Math.floor(camera.position[2]);
-                
-                // Check if standing on solid ground (检查是否站在固体地面上)
-                const onGround = isVoxelSolid(feetCheckX, feetY - 1, feetCheckZ);
-                
-                if (onGround && camera.velocity[1] < 0) {
-                   // 着陆: 停止下落并对齐到地面 | Landing: stop falling and align to ground
-                   camera.position[1] = Math.floor(camera.position[1]) + 1.0;
-                   camera.velocity[1] = 0;
-                   camera.isGrounded = true;
-                } else if (desiredY < 1) {
-                   // Hit bottom of world (触碰世界底部)
-                   camera.position[1] = 1;
-                   camera.velocity[1] = 0;
-                   camera.isGrounded = true;
-                } else {
-                   // Check ceiling collision (检查天花板碰撞)
-                   const headY = Math.floor(desiredY + playerHeight);
-                   if (isVoxelSolid(feetCheckX, headY, feetCheckZ) && camera.velocity[1] > 0) {
-                      // Hit ceiling (撞到天花板)
-                      camera.velocity[1] = 0;
-                      camera.position[1] = Math.floor(camera.position[1] + playerHeight) - playerHeight;
-                   } else {
-                      // Normal movement (正常移动)
-                      camera.position[1] = desiredY;
-                      camera.isGrounded = false;
-                   }
-                }
-                
-                // 🦘 Jump mechanic (跳跃机制)
-                // Press space to jump (only when grounded)
-                // 按空格键跳跃(仅在地面上时) | Press space to jump (only when grounded)
-                if (keyState.space && camera.isGrounded) {
-                   camera.velocity[1] = camera.jumpVelocity;
-                   camera.isGrounded = false;
-                }
-                
-                // Keep within world bounds (保持在世界边界内)
+                camera.position[0] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[0]));
                 camera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[1]));
+                camera.position[2] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[2]));
              }
 
              let lastFrameTime = performance.now();
