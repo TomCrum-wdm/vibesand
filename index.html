@@ -1274,6 +1274,7 @@
                  const VOXEL_TYPE_STONE = 1u;    // 石头(固体) | Stone (solid)
                  const VOXEL_TYPE_SAND = 2u;     // 沙子(会下落) | Sand (falls)
                  const VOXEL_TYPE_WATER = 3u;    // 水(流动) | Water (flows)
+                 const VOXEL_TYPE_PLAYER = 4u;   // 玩家(受物理影响) | Player (affected by physics)
 
                  // 🛠️ 工具类型常量 | Tool Type Constants
                  const TOOL_TYPE_SAND = 0u;
@@ -1446,8 +1447,11 @@
                          return;
                      }
 
+                     // Don't delete player voxel if it reaches bottom, but delete other loose voxels
                      if (global_id.y == 0u) {
-                         atomicStore(&voxels[current_idx].data, 0u);
+                         if (current_type != VOXEL_TYPE_PLAYER) {
+                             atomicStore(&voxels[current_idx].data, 0u);
+                         }
                          return;
                      }
 
@@ -1458,7 +1462,7 @@
                          let type_below = getVoxelType(atomicLoad(&voxels[idx_below].data));
                          if (type_below == VOXEL_TYPE_AIR) {
                              if (attempt_move(current_idx, idx_below, initial_data)) { return; }
-                         } else if (current_type == VOXEL_TYPE_SAND && type_below == VOXEL_TYPE_WATER) {
+                         } else if ((current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) && type_below == VOXEL_TYPE_WATER) {
                              if (attempt_swap(current_idx, idx_below, initial_data)) { return; }
                          }
                      }
@@ -1467,7 +1471,7 @@
 
                      // PRIORITY 2: Diagonal Fall
                      if (global_id.y > 0u) {
-                         if (current_type == VOXEL_TYPE_SAND) {
+                         if (current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) {
                              let DIAGONAL_SLIDES_SAND = array<vec3<i32>, 8>(
                                  vec3(1,-1,0), vec3(-1,-1,0), vec3(0,-1,1), vec3(0,-1,-1),
                                  vec3(1,-1,1), vec3(-1,-1,1), vec3(1,-1,-1), vec3(-1,-1,-1)
@@ -1480,7 +1484,7 @@
                                      let type_diag = getVoxelType(atomicLoad(&voxels[check_idx].data));
                                      if (type_diag == VOXEL_TYPE_AIR) {
                                          if(attempt_move(current_idx, check_idx, initial_data)) { return; }
-                                     } else if (type_diag == VOXEL_TYPE_WATER) { // Sand swaps with water diagonally
+                                     } else if (type_diag == VOXEL_TYPE_WATER) { // Sand/Player swaps with water diagonally
                                          if(attempt_swap(current_idx, check_idx, initial_data)) { return; }
                                      }
                                  }
@@ -1633,6 +1637,24 @@
                  }
              `;
 
+            const findPlayerShaderCode = `
+                ${commonShaderCode}
+                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
+                @group(0) @binding(1) var<storage, read_write> player_pos_output: vec4<u32>; // xyz position + found flag
+                
+                @compute @workgroup_size(4, 4, 4)
+                fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                    let idx = pos_to_idx(id);
+                    if (idx != 0xFFFFFFFFu) {
+                        let v_type = getVoxelType(atomicLoad(&voxels[idx].data));
+                        if (v_type == VOXEL_TYPE_PLAYER) {
+                            // Found the player voxel, write its position
+                            player_pos_output = vec4<u32>(id.x, id.y, id.z, 1u);
+                        }
+                    }
+                }
+            `;
+
              const targetingShaderCode = `
                  ${commonShaderCode}
                  @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
@@ -1700,6 +1722,9 @@
                      }
                      if (voxel.v_type == VOXEL_TYPE_SAND) {
                          return vec3(0.8, 0.7, 0.4) + (variant_f - 0.5) * 0.1;
+                     }
+                     if (voxel.v_type == VOXEL_TYPE_PLAYER) {
+                         return vec3(0.2, 0.8, 0.2); // Bright green for player visibility
                      }
                      if (is_water) {
                          return vec3(0.15, 0.45, 0.85); // Flat base color for water, variant removed
@@ -1962,6 +1987,20 @@
              const targetingOutputBuffer = device.createBuffer({ 
                  size: 32,  // vec4<f32> + u32 + 填充 | vec4<f32> + u32 + padding
                  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC 
+             });
+             
+             // 🧍 玩家位置输出缓冲区 | Player position output buffer
+             // 存储GPU找到的玩家体素位置 | Stores player voxel position found by GPU
+             const playerPosBuffer = device.createBuffer({
+                 size: 16,  // vec4<u32> = 16 bytes (x, y, z, found_flag)
+                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+             });
+             
+             // 玩家位置读取缓冲区 | Player position readback buffer  
+             // 用于从GPU读回玩家位置到CPU | Used to read back player position from GPU to CPU
+             const playerPosReadBuffer = device.createBuffer({
+                 size: 16,
+                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
              });
              
              // 💡 光源统一缓冲区 | Lights uniform buffer
