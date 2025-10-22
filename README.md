@@ -41,6 +41,8 @@ The GPU pipeline consists of multiple compute and render shaders:
 - `paintShaderCode` - Tool application (sand, stone, water, destroy)
 - `clearLooseVoxelsShaderCode` - Removes non-solid voxels
 - `targetingShaderCode` - GPU raycasting for cursor 3D position
+- `managePlayerShaderCode` - Player voxel creation/maintenance (first-person mode)
+- `findPlayerShaderCode` - Player voxel position tracking (GPU scan)
 
 **Render Shader:**
 - `renderShaderCode` - Single-pass DDA raymarching fragment shader
@@ -109,8 +111,14 @@ VibeSand implements **two distinct camera modes**:
 - **Features**:
   - Crosshair HUD overlay
   - Pointer lock for seamless mouse look
-  - Noclip movement (passes through voxels)
-  - Player voxel representation (bright green) subject to GPU physics
+  - Noclip movement (camera passes through voxels freely)
+  - **Player voxel physics system**:
+    - Bright green player voxel spawned at camera position
+    - Player voxel affected by gravity and collision (like sand)
+    - Falls, slides diagonally, swaps with water
+    - GPU-tracked with zero CPU readback (pure GPU pipeline)
+    - Automatically respawns if destroyed or falls off world
+    - Independent from camera (camera uses noclip, voxel uses physics)
 
 **Camera Shared Systems:**
 - Both modes calculate `currentRight`, `currentUp`, `currentForward` vectors
@@ -133,17 +141,23 @@ All physics runs on the GPU using compute shaders:
 4. Water horizontal spread (2-cell pressure)
 
 **Particle Types:**
-- Stone: Static solid
-- Sand: Falls, slides, swaps with water
-- Water: Falls, flows, spreads horizontally
-- Player: Behaves like sand (affected by gravity and collision), bright green color
+- Stone: Static solid, never moves
+- Sand: Falls, slides diagonally, tumbles, swaps with water
+- Water: Falls, flows, spreads horizontally with pressure
+- **Player**: Behaves identically to sand (gravity, collision, sliding, water swapping)
+  - Bright green color (RGB: 0.2, 0.8, 0.2) for high visibility
+  - Spawned automatically in first-person mode
+  - GPU-managed with zero CPU readback
+  - Protected from deletion at y=0 (respawns if lost)
 - Air: Empty space
 
 #### 5. **Rendering Pipeline**
 
 **Multi-Pass GPU Architecture:**
 1. **Targeting Pass** - GPU raycast finds cursor 3D position
-2. **Physics Passes** - Multiple simulation steps per frame
+1.5. **Player Management Pass** - Spawn/maintain player voxel (first-person mode only)
+2. **Physics Passes** - Multiple simulation steps per frame (player voxel falls with gravity)
+2.5. **Player Tracking Pass** - GPU scan to locate player voxel after physics (first-person mode only)
 3. **Tool Application** - Modify voxels based on user input
 4. **Lighting Pass** - Calculate light contributions from 32 dynamic point lights
 5. **Render Pass** - Single-pass DDA raymarching renders the scene
@@ -173,11 +187,13 @@ Bits 24-31: Blue light channel (8 bits)
 - `renderPassUniformsBuffer`: Camera and sun data
 - `computePassUniformsBuffer`: Tool and simulation params
 - `targetingOutputBuffer`: Cursor raycast results
+- `playerPosBuffer`: Player voxel position tracking (16 bytes: x, y, z, found_flag)
 
 ### Key Features
 
-- **Zero CPU Readback**: All raycasting, physics, and rendering on GPU
+- **Zero CPU Readback**: All raycasting, physics, player tracking, and rendering on GPU
 - **Atomic Operations**: Lock-free parallel physics using atomics
+- **Player Voxel Physics**: GPU-managed player representation with gravity and collision
 - **Dynamic Lighting**: 32 falling colored point lights ("light rain")
 - **Interactive Tools**: Brush-based painting system with preview
 - **Resolution Scaling**: Adjustable render resolution for performance
