@@ -1970,6 +1970,19 @@
                  size: 32 * NUM_LIGHTS + 16,  // 每个光源32字节 + 16字节元数据 | 32 bytes per light + 16 bytes metadata
                  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST 
              });
+            
+            // 🧱 体素碰撞缓冲区 | Voxel collision staging buffer
+            // 用于从GPU读取体素数据到CPU进行碰撞检测 | Used to read voxel data from GPU to CPU for collision detection
+            const voxelCollisionStagingBuffer = device.createBuffer({
+                size: VOXEL_BUFFER_SIZE,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+            });
+            
+            // 💾 CPU端体素数据缓存 | CPU-side voxel data cache
+            // 存储从GPU读取的体素类型数据 | Stores voxel type data read from GPU
+            let voxelDataCache = new Uint32Array(NUM_VOXELS);
+            let voxelCacheValid = false;  // 标记缓存是否有效 | Flag if cache is valid
+            let voxelCacheUpdatePending = false;  // 标记是否正在更新 | Flag if update is pending
 
              // ==================================================
              // 🔧 GPU管线创建 | GPU Pipeline Creation
@@ -2183,6 +2196,8 @@
                  genPass.end();
                  device.queue.submit([commandEncoder.finish()]);
                  frameCount = 0;
+                // 标记缓存无效，需要在下一帧更新 | Mark cache invalid, needs update on next frame
+                voxelCacheValid = false;
              }
 
              runGeneration();
@@ -2358,17 +2373,58 @@
              }
              resizeCanvasAndContext();
 
-             // 🧱 Helper function to check if a voxel is solid
-             // 检查体素是否为固体(用于碰撞检测) | Check if a voxel is solid (for collision detection)
-             function isVoxelSolid(x, y, z) {
-                if (x < 0 || y < 0 || z < 0 || x >= VOXEL_GRID_SIZE || y >= VOXEL_GRID_SIZE || z >= VOXEL_GRID_SIZE) {
-                   return true; // Out of bounds is solid (边界外视为固体)
-                }
-                // 我们无法实时从GPU缓冲区读取，所以使用近似碰撞
-                // We can't easily read from GPU buffer in real-time, so we'll use approximate collision
-                // 假设y < 32是固体(地形高度) | Assume y < 32 is solid (terrain level)
-                return y < 32;
-             }
+            // 🔄 异步更新体素缓存 | Async function to update voxel cache
+            // 从GPU读取体素数据到CPU缓存用于碰撞检测 | Read voxel data from GPU to CPU cache for collision detection
+            async function updateVoxelCache() {
+               if (voxelCacheUpdatePending) return;  // 如果已在更新中，跳过 | Skip if already updating
+               
+               voxelCacheUpdatePending = true;
+               
+               // 创建命令编码器复制数据 | Create command encoder to copy data
+               const commandEncoder = device.createCommandEncoder();
+               commandEncoder.copyBufferToBuffer(voxelBuffer, 0, voxelCollisionStagingBuffer, 0, VOXEL_BUFFER_SIZE);
+               device.queue.submit([commandEncoder.finish()]);
+               
+               // 等待GPU操作完成并映射缓冲区 | Wait for GPU operation and map buffer
+               await voxelCollisionStagingBuffer.mapAsync(GPUMapMode.READ);
+               
+               // 读取数据到缓存 | Read data to cache
+               const mappedData = new Uint32Array(voxelCollisionStagingBuffer.getMappedRange());
+               voxelDataCache.set(mappedData);
+               
+               // 解除映射 | Unmap buffer
+               voxelCollisionStagingBuffer.unmap();
+               
+               voxelCacheValid = true;
+               voxelCacheUpdatePending = false;
+            }
+            
+            // 🧱 检查体素是否为固体 | Check if a voxel is solid
+            // 使用从GPU读取的实际体素数据进行碰撞检测 | Use actual voxel data read from GPU for collision detection
+            function isVoxelSolid(x, y, z) {
+               // 边界检查 | Boundary check
+               if (x < 0 || y < 0 || z < 0 || x >= VOXEL_GRID_SIZE || y >= VOXEL_GRID_SIZE || z >= VOXEL_GRID_SIZE) {
+                  return true; // 边界外视为固体 | Out of bounds is solid
+               }
+               
+               // 如果缓存无效，使用近似碰撞(回退方案) | If cache invalid, use approximate collision (fallback)
+               if (!voxelCacheValid) {
+                  return y < 32;  // 假设地形高度 | Assume terrain level
+               }
+               
+               // 从缓存读取体素数据 | Read voxel data from cache
+               const idx = Math.floor(x) + Math.floor(y) * VOXEL_GRID_SIZE + Math.floor(z) * VOXEL_GRID_SIZE * VOXEL_GRID_SIZE;
+               if (idx < 0 || idx >= NUM_VOXELS) return true;
+               
+               const voxelData = voxelDataCache[idx];
+               // 提取体素类型 (bits 0-2) | Extract voxel type (bits 0-2)
+               const voxelType = voxelData & 0x7;
+               
+               // 只有石头被视为固体，空气、沙子、水都不是固体
+               // Only stone is considered solid, air, sand, and water are not
+               // 0 = air, 1 = stone, 2 = sand, 3 = water
+               return voxelType === 1;  // VOXEL_TYPE_STONE
+            }
 
              // 🎮 Update first-person camera with full physics engine
              // 更新第一人称相机物理引擎 | Update first-person camera physics engine
@@ -2438,35 +2494,68 @@
                 
                 // 📍 Check ground collision (检查地面碰撞)
                 const desiredY = camera.position[1] + camera.velocity[1] * deltaTime;
-                const feetY = Math.floor(desiredY);
                 const feetCheckX = Math.floor(camera.position[0]);
                 const feetCheckZ = Math.floor(camera.position[2]);
                 
-                // Check if standing on solid ground (检查是否站在固体地面上)
-                const onGround = isVoxelSolid(feetCheckX, feetY - 1, feetCheckZ);
-                
-                if (onGround && camera.velocity[1] < 0) {
-                   // 着陆: 停止下落并对齐到地面 | Landing: stop falling and align to ground
-                   camera.position[1] = Math.floor(camera.position[1]) + 1.0;
-                   camera.velocity[1] = 0;
-                   camera.isGrounded = true;
-                } else if (desiredY < 1) {
-                   // Hit bottom of world (触碰世界底部)
-                   camera.position[1] = 1;
-                   camera.velocity[1] = 0;
-                   camera.isGrounded = true;
-                } else {
-                   // Check ceiling collision (检查天花板碰撞)
-                   const headY = Math.floor(desiredY + playerHeight);
-                   if (isVoxelSolid(feetCheckX, headY, feetCheckZ) && camera.velocity[1] > 0) {
-                      // Hit ceiling (撞到天花板)
+                // Check if we would collide with ground (检查是否会碰到地面)
+                if (camera.velocity[1] < 0) {  // Only check when falling
+                   // Find the ground level by checking below desired position
+                   // 通过检查目标位置下方找到地面高度
+                   const checkFeetY = Math.floor(desiredY);
+                   
+                   // Check if there's solid ground below feet
+                   // 检查脚下是否有固体地面
+                   if (isVoxelSolid(feetCheckX, checkFeetY, feetCheckZ)) {
+                      // Hit solid voxel - find exact ground level
+                      // 碰到固体体素 - 找到准确的地面高度
+                      let groundLevel = checkFeetY;
+                      // Search upward to find the first air voxel above solid ground
+                      // 向上搜索找到固体地面上方的第一个空气体素
+                      while (groundLevel < VOXEL_GRID_SIZE && isVoxelSolid(feetCheckX, groundLevel, feetCheckZ)) {
+                         groundLevel++;
+                      }
+                      // Position player just above the solid ground
+                      // 将玩家定位在固体地面正上方
+                      camera.position[1] = groundLevel + 0.01;  // Small offset to prevent clipping
                       camera.velocity[1] = 0;
-                      camera.position[1] = Math.floor(camera.position[1] + playerHeight) - playerHeight;
+                      camera.isGrounded = true;
                    } else {
-                      // Normal movement (正常移动)
+                      // No collision, continue falling
+                      // 没有碰撞，继续下落
                       camera.position[1] = desiredY;
                       camera.isGrounded = false;
                    }
+                } else if (camera.velocity[1] > 0) {
+                   // Moving up - check ceiling collision (向上移动 - 检查天花板碰撞)
+                   const headY = Math.floor(desiredY + playerHeight);
+                   if (isVoxelSolid(feetCheckX, headY, feetCheckZ)) {
+                      // Hit ceiling (撞到天花板)
+                      camera.velocity[1] = 0;
+                      // Position just below ceiling
+                      camera.position[1] = headY - playerHeight - 0.01;
+                   } else {
+                      // No collision, continue moving up
+                      camera.position[1] = desiredY;
+                      camera.isGrounded = false;
+                   }
+                } else {
+                   // No vertical movement (velocity = 0)
+                   // Still need to check if standing on solid ground
+                   const standingFeetY = Math.floor(camera.position[1]);
+                   const onGround = isVoxelSolid(feetCheckX, standingFeetY - 1, feetCheckZ);
+                   if (onGround) {
+                      camera.isGrounded = true;
+                   } else {
+                      // No ground below, should start falling
+                      camera.isGrounded = false;
+                   }
+                }
+                
+                // Bottom of world check (世界底部检查)
+                if (camera.position[1] < 1) {
+                   camera.position[1] = 1;
+                   camera.velocity[1] = 0;
+                   camera.isGrounded = true;
                 }
                 
                 // 🦘 Jump mechanic (跳跃机制)
@@ -2495,6 +2584,12 @@
                  
                  // 🎮 更新第一人称相机(如果在FPS模式) | Update first-person camera (if in FPS mode)
                  updateFirstPersonCamera(deltaTime);
+                
+                // 🔄 定期更新体素缓存(每30帧) | Periodically update voxel cache (every 30 frames)
+                // 这确保碰撞检测使用最新的体素数据 | This ensures collision detection uses latest voxel data
+                if (frameCount % 30 === 0 && !voxelCacheUpdatePending) {
+                   updateVoxelCache().catch(err => console.error("Voxel cache update failed:", err));
+                }
                  
                  // 📷 根据相机模式计算相机位置和方向 | Calculate camera position and orientation based on mode
                  if (cameraMode === 'firstperson') {
