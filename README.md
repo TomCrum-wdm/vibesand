@@ -83,11 +83,10 @@ VibeSand implements **two distinct camera modes**:
 
 ##### **First Person Camera Mode**
 - **Architecture**: FPS-style camera with WASD movement and mouse look
-- **Implementation**: Position-based with yaw/pitch orientation
+- **Implementation**: Position-based with yaw/pitch orientation (noclip movement)
 - **Controls**:
   - WASD: Move forward/left/backward/right
   - Space: Move up
-  - Shift: Move down
   - Mouse: Look around (pointer lock API)
   - Left-click: Use tool at crosshair
 - **Camera State**:
@@ -110,7 +109,8 @@ VibeSand implements **two distinct camera modes**:
 - **Features**:
   - Crosshair HUD overlay
   - Pointer lock for seamless mouse look
-  - Simple boundary collision detection
+  - Noclip movement (passes through voxels)
+  - Player voxel representation (bright green) subject to GPU physics
 
 **Camera Shared Systems:**
 - Both modes calculate `currentRight`, `currentUp`, `currentForward` vectors
@@ -136,6 +136,7 @@ All physics runs on the GPU using compute shaders:
 - Stone: Static solid
 - Sand: Falls, slides, swaps with water
 - Water: Falls, flows, spreads horizontally
+- Player: Behaves like sand (affected by gravity and collision), bright green color
 - Air: Empty space
 
 #### 5. **Rendering Pipeline**
