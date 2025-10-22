@@ -1648,9 +1648,65 @@
                     if (idx != 0xFFFFFFFFu) {
                         let v_type = getVoxelType(atomicLoad(&voxels[idx].data));
                         if (v_type == VOXEL_TYPE_PLAYER) {
-                            // Found the player voxel, write its position
-                            player_pos_output = vec4<u32>(id.x, id.y, id.z, 1u);
+                            // Found the player voxel, write its position atomically
+                            // Only first thread to find player will write (race is acceptable)
+                            atomicStore(&player_pos_output.x, id.x);
+                            atomicStore(&player_pos_output.y, id.y);
+                            atomicStore(&player_pos_output.z, id.z);
+                            atomicStore(&player_pos_output.w, 1u);
                         }
+                    }
+                }
+            `;
+
+            const managePlayerShaderCode = `
+                ${commonShaderCode}
+                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
+                @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
+                @group(0) @binding(2) var<storage, read_write> player_pos_output: vec4<u32>;
+                
+                @compute @workgroup_size(1, 1, 1)
+                fn main() {
+                    // Get desired camera position from uniforms
+                    let camera_pos = tool_info.camera_position;
+                    let target_pos = vec3<u32>(
+                        clamp(u32(floor(camera_pos.x)), 0u, GRID_DIM - 1u),
+                        clamp(u32(floor(camera_pos.y)), 0u, GRID_DIM - 1u),
+                        clamp(u32(floor(camera_pos.z)), 0u, GRID_DIM - 1u)
+                    );
+                    
+                    // Check if player voxel already exists at last known position
+                    let last_found = atomicLoad(&player_pos_output.w);
+                    if (last_found == 1u) {
+                        let last_pos = vec3<u32>(
+                            atomicLoad(&player_pos_output.x),
+                            atomicLoad(&player_pos_output.y),
+                            atomicLoad(&player_pos_output.z)
+                        );
+                        let last_idx = pos_to_idx(last_pos);
+                        if (last_idx != 0xFFFFFFFFu) {
+                            let voxel_data = atomicLoad(&voxels[last_idx].data);
+                            if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
+                                // Player voxel still exists and is falling with physics
+                                // Just clear found flag for next frame's search
+                                atomicStore(&player_pos_output.w, 0u);
+                                return;
+                            }
+                        }
+                    }
+                    
+                    // Player voxel doesn't exist (fell off or was destroyed), create new one at camera position
+                    let target_idx = pos_to_idx(target_pos);
+                    if (target_idx != 0xFFFFFFFFu) {
+                        // Always try to place player voxel, even if occupied (will replace)
+                        // This ensures player is always visible near camera
+                        atomicStore(&voxels[target_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
+                        
+                        // Update player position output with found flag cleared for next search
+                        atomicStore(&player_pos_output.x, target_pos.x);
+                        atomicStore(&player_pos_output.y, target_pos.y);
+                        atomicStore(&player_pos_output.z, target_pos.z);
+                        atomicStore(&player_pos_output.w, 0u);
                     }
                 }
             `;
@@ -2086,6 +2142,26 @@
                  }
              });
              
+             // 🔍 寻找玩家管线 | Find player pipeline
+             // 用途: GPU扫描找到玩家体素位置 | Purpose: GPU scan to find player voxel position
+             const findPlayerPipeline = device.createComputePipeline({
+                 layout: 'auto',
+                 compute: {
+                     module: device.createShaderModule({ code: findPlayerShaderCode }),
+                     entryPoint: 'main'
+                 }
+             });
+             
+             // 🧍 管理玩家管线 | Manage player pipeline
+             // 用途: 创建/维护玩家体素 | Purpose: Create/maintain player voxel
+             const managePlayerPipeline = device.createComputePipeline({
+                 layout: 'auto',
+                 compute: {
+                     module: device.createShaderModule({ code: managePlayerShaderCode }),
+                     entryPoint: 'main'
+                 }
+             });
+             
              // 🎨 渲染管线 | Render pipeline
              // 用途: 将3D体素世界渲染到2D屏幕 | Purpose: Render 3D voxel world to 2D screen
              // 这是唯一的渲染管线，其他都是计算管线 | This is the only render pipeline, others are compute pipelines
@@ -2182,6 +2258,27 @@
                      { binding: 0, resource: { buffer: voxelBuffer } }, 
                      { binding: 1, resource: { buffer: computePassUniformsBuffer } }, 
                      { binding: 2, resource: { buffer: targetingOutputBuffer } }
+                 ]
+             });
+             
+             // 🔍 寻找玩家绑定组 | Find player bind group
+             // 绑定: 体素缓冲区(只读) + 玩家位置输出(写入) | Binds: voxel buffer + player position output
+             const findPlayerBindGroup = device.createBindGroup({
+                 layout: findPlayerPipeline.getBindGroupLayout(0),
+                 entries: [
+                     { binding: 0, resource: { buffer: voxelBuffer } },
+                     { binding: 1, resource: { buffer: playerPosBuffer } }
+                 ]
+             });
+             
+             // 🧍 管理玩家绑定组 | Manage player bind group
+             // 绑定: 体素缓冲区(读写) + 计算参数(只读) + 玩家位置输出(读写) | Binds: voxel buffer + compute params + player position
+             const managePlayerBindGroup = device.createBindGroup({
+                 layout: managePlayerPipeline.getBindGroupLayout(0),
+                 entries: [
+                     { binding: 0, resource: { buffer: voxelBuffer } },
+                     { binding: 1, resource: { buffer: computePassUniformsBuffer } },
+                     { binding: 2, resource: { buffer: playerPosBuffer } }
                  ]
              });
              
@@ -2597,6 +2694,16 @@
                  passTarget.dispatchWorkgroups(1);  // 只需要1个工作组 | Only need 1 workgroup
                  passTarget.end();
 
+                 // 🧍 第1.5步: 玩家体素管理通道(仅第一人称模式) | Step 1.5: Player voxel management pass (first-person mode only)
+                 if (cameraMode === 'firstperson') {
+                     // 管理玩家体素: 创建或维护玩家体素 | Manage player voxel: create or maintain player voxel
+                     const passManagePlayer = commandEncoder.beginComputePass();
+                     passManagePlayer.setPipeline(managePlayerPipeline);
+                     passManagePlayer.setBindGroup(0, managePlayerBindGroup);
+                     passManagePlayer.dispatchWorkgroups(1);  // 单线程管理 | Single thread management
+                     passManagePlayer.end();
+                 }
+
                  // ⚡ 第2步: 物理模拟通道(可能多次) | Step 2: Physics simulation pass (possibly multiple times)
                  // 🎨 可调参数: uiControls.simSteps控制每帧模拟步数 | Adjustable: simSteps controls simulation steps per frame
                  if (uiControls.simSteps > 0) {
@@ -2617,6 +2724,16 @@
                          passSim.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4); 
                          passSim.end();
                      }
+                 }
+
+                 // 🔍 第2.5步: 寻找玩家体素位置(仅第一人称模式) | Step 2.5: Find player voxel position (first-person mode only)
+                 if (cameraMode === 'firstperson') {
+                     // 扫描所有体素寻找玩家 | Scan all voxels to find player
+                     const passFindPlayer = commandEncoder.beginComputePass();
+                     passFindPlayer.setPipeline(findPlayerPipeline);
+                     passFindPlayer.setBindGroup(0, findPlayerBindGroup);
+                     passFindPlayer.dispatchWorkgroups(VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4);
+                     passFindPlayer.end();
                  }
 
                  // 🖌️ 第3步: 绘制工具应用 | Step 3: Paint tool application
