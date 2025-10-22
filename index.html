@@ -2486,8 +2486,6 @@
                 newZ = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, newZ));
                 
                 camera.position[0] = newX;
-                camera.position[2] = newZ;
-                
                 // ⬇️ Apply gravity to vertical velocity
                 // 对垂直速度应用重力 | Apply gravity to vertical velocity
                 camera.velocity[1] += camera.gravity * deltaTime;
@@ -2498,57 +2496,70 @@
                 const feetCheckZ = Math.floor(camera.position[2]);
                 
                 // Check if we would collide with ground (检查是否会碰到地面)
-                if (camera.velocity[1] < 0) {  // Only check when falling
-                   // Find the ground level by checking below desired position
-                   // 通过检查目标位置下方找到地面高度
-                   const checkFeetY = Math.floor(desiredY);
+                if (camera.velocity[1] <= 0) {  // Falling or stationary
+                   // Check the voxel directly below player's feet position
+                   // 检查玩家脚下正下方的体素
+                   const currentFeetY = Math.floor(camera.position[1]);
+                   const feetVoxelBelow = currentFeetY - 1;
                    
-                   // Check if there's solid ground below feet
-                   // 检查脚下是否有固体地面
-                   if (isVoxelSolid(feetCheckX, checkFeetY, feetCheckZ)) {
-                      // Hit solid voxel - find exact ground level
-                      // 碰到固体体素 - 找到准确的地面高度
-                      let groundLevel = checkFeetY;
-                      // Search upward to find the first air voxel above solid ground
-                      // 向上搜索找到固体地面上方的第一个空气体素
-                      while (groundLevel < VOXEL_GRID_SIZE && isVoxelSolid(feetCheckX, groundLevel, feetCheckZ)) {
-                         groundLevel++;
+                   // Check if standing on solid ground
+                   // 检查是否站在固体地面上
+                   const onGround = isVoxelSolid(feetCheckX, feetVoxelBelow, feetCheckZ);
+                   
+                   if (onGround) {
+                      // On solid ground - snap to proper position above it
+                      // 在固体地面上 - 对齐到正确位置
+                      // Find the exact top of solid ground
+                      let groundTop = feetVoxelBelow;
+                      while (groundTop < VOXEL_GRID_SIZE && isVoxelSolid(feetCheckX, groundTop, feetCheckZ)) {
+                         groundTop++;
                       }
-                      // Position player just above the solid ground
-                      // 将玩家定位在固体地面正上方
-                      camera.position[1] = groundLevel + 0.01;  // Small offset to prevent clipping
+                      // Snap to ground level to prevent falling through
+                      // 对齐到地面高度防止穿模
+                      camera.position[1] = groundTop + 0.1;
                       camera.velocity[1] = 0;
                       camera.isGrounded = true;
                    } else {
-                      // No collision, continue falling
-                      // 没有碰撞，继续下落
-                      camera.position[1] = desiredY;
-                      camera.isGrounded = false;
+                      // No ground below - check if we're falling into solid
+                      // 下方没有地面 - 检查是否会掉入固体
+                      const nextFeetY = Math.floor(desiredY);
+                      if (isVoxelSolid(feetCheckX, nextFeetY, feetCheckZ)) {
+                         // Would fall into solid - stop at boundary
+                         // 会掉入固体 - 停在边界
+                         let groundTop = nextFeetY;
+                         while (groundTop < VOXEL_GRID_SIZE && isVoxelSolid(feetCheckX, groundTop, feetCheckZ)) {
+                            groundTop++;
+                         }
+                         camera.position[1] = groundTop + 0.1;
+                         camera.velocity[1] = 0;
+                         camera.isGrounded = true;
+                      } else {
+                         // Free to fall
+                         // 自由下落
+                         camera.position[1] = desiredY;
+                         camera.isGrounded = false;
+                      }
                    }
-                } else if (camera.velocity[1] > 0) {
+                } else {
                    // Moving up - check ceiling collision (向上移动 - 检查天花板碰撞)
                    const headY = Math.floor(desiredY + playerHeight);
                    if (isVoxelSolid(feetCheckX, headY, feetCheckZ)) {
                       // Hit ceiling (撞到天花板)
                       camera.velocity[1] = 0;
                       // Position just below ceiling
-                      camera.position[1] = headY - playerHeight - 0.01;
+                      camera.position[1] = headY - playerHeight - 0.1;
                    } else {
                       // No collision, continue moving up
                       camera.position[1] = desiredY;
                       camera.isGrounded = false;
                    }
-                } else {
-                   // No vertical movement (velocity = 0)
-                   // Still need to check if standing on solid ground
-                   const standingFeetY = Math.floor(camera.position[1]);
-                   const onGround = isVoxelSolid(feetCheckX, standingFeetY - 1, feetCheckZ);
-                   if (onGround) {
-                      camera.isGrounded = true;
-                   } else {
-                      // No ground below, should start falling
-                      camera.isGrounded = false;
-                   }
+                }
+                
+                // Bottom of world check (世界底部检查)
+                if (camera.position[1] < 1) {
+                   camera.position[1] = 1;
+                   camera.velocity[1] = 0;
+                   camera.isGrounded = true;
                 }
                 
                 // Bottom of world check (世界底部检查)
