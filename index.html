@@ -1886,6 +1886,116 @@
                  }
              `;
 
+
+            // 🎯 目标定位着色器代码 | Targeting shader code
+            // 用途: 从鼠标位置发射光线，找到体素网格的交点 | Purpose: Cast ray from mouse position to find voxel grid intersection
+            const targetingShaderCode = `
+                ${commonShaderCode}
+                @group(0) @binding(0) var<storage, read> voxels: array<VoxelData>;
+                @group(0) @binding(1) var<uniform> uniforms: ComputePassUniforms;
+                @group(0) @binding(2) var<storage, read_write> output: TargetingOutput;
+
+                // 🎯 主计算入口 | Main compute entry point
+                // 单线程执行：从鼠标位置发射光线，找到命中点 | Single thread: cast ray from mouse, find hit point
+                @compute @workgroup_size(1)
+                fn main() {
+                    // 📷 计算相机前向向量 | Calculate camera forward vector
+                    let cam_fwd = normalize(uniforms.camera_target_pos - uniforms.camera_position);
+                    
+                    // 📐 计算屏幕宽高比 | Calculate aspect ratio
+                    let aspect = uniforms.canvas_dims.x / uniforms.canvas_dims.y;
+                    
+                    // 🖱️ 将鼠标位置从屏幕空间转换到NDC空间 | Convert mouse position from screen to NDC space
+                    let ndc_x = (uniforms.mouse_pos.x / uniforms.canvas_dims.x - 0.5) * 2.0 * aspect;
+                    let ndc_y = (uniforms.mouse_pos.y / uniforms.canvas_dims.y - 0.5) * -2.0;
+                    
+                    // 🎯 构建光线方向 | Construct ray direction
+                    let ray_dir = normalize(
+                        uniforms.camera_right * ndc_x + 
+                        uniforms.camera_up * ndc_y + 
+                        cam_fwd * uniforms.camera_zoom
+                    );
+                    
+                    // 📦 计算光线与体素网格AABB的交点 | Calculate ray-AABB intersection with voxel grid
+                    let grid_min = vec3<f32>(0.0);
+                    let grid_max = vec3<f32>(f32(GRID_DIM));
+                    let t1 = (grid_min - uniforms.camera_position) / ray_dir;
+                    let t2 = (grid_max - uniforms.camera_position) / ray_dir;
+                    let t_min = max(max(min(t1.x, t2.x), min(t1.y, t2.y)), min(t1.z, t2.z));
+                    let t_max = min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z));
+                    
+                    // 🔍 初始化输出 | Initialize output
+                    output.hit = 0u;
+                    output.aim_pos = vec4<f32>(0.0);
+                    
+                    // 🚫 如果光线没有击中网格边界，直接返回 | Return if ray doesn't hit grid bounds
+                    if (t_min >= t_max || t_max <= 0.0) {
+                        return;
+                    }
+                    
+                    // 🎲 DDA光线追踪算法 | DDA ray marching algorithm
+                    // 从光线与网格的交点开始 | Start from ray-grid intersection
+                    var dda_pos = uniforms.camera_position + ray_dir * (max(0.0, t_min) + 0.001);
+                    var map_pos = vec3<i32>(floor(dda_pos));
+                    
+                    // 📏 计算DDA步进参数 | Calculate DDA stepping parameters
+                    let step = vec3<i32>(sign(ray_dir));
+                    let delta = abs(1.0 / (ray_dir + vec3<f32>(1e-6)));
+                    var side = (vec3<f32>(step) * (vec3<f32>(map_pos) - dda_pos) + (vec3<f32>(step) * 0.5 + 0.5)) * delta;
+                    
+                    // 🔄 光线步进循环 | Ray stepping loop
+                    for (var i = 0u; i < uniforms.max_ray_steps_compute; i = i + 1u) {
+                        // 计算法线（用于确定击中面） | Calculate normal (to determine hit face)
+                        var normal: vec3<f32>;
+                        
+                        // 🪜 沿最近的轴步进 | Step along the closest axis
+                        if (side.x < side.y && side.x < side.z) {
+                            side.x += delta.x;
+                            map_pos.x += step.x;
+                            normal = vec3<f32>(-f32(step.x), 0.0, 0.0);
+                        } else if (side.y < side.z) {
+                            side.y += delta.y;
+                            map_pos.y += step.y;
+                            normal = vec3<f32>(0.0, -f32(step.y), 0.0);
+                        } else {
+                            side.z += delta.z;
+                            map_pos.z += step.z;
+                            normal = vec3<f32>(0.0, 0.0, -f32(step.z));
+                        }
+                        
+                        // 🔍 检查是否在网格范围内 | Check if within grid bounds
+                        let idx = pos_to_idx_i32(map_pos);
+                        if (idx != 0xFFFFFFFFu) {
+                            // 📦 读取体素数据 | Read voxel data
+                            let voxel_data = atomicLoad(&voxels[idx].data);
+                            let voxel_type = getVoxelType(voxel_data);
+                            
+                            // 💥 检测击中 | Check for hit
+                            if (voxel_type != VOXEL_TYPE_AIR) {
+                                // 🎯 计算击中位置 | Calculate hit position
+                                var hit_pos = vec3<f32>(map_pos) + vec3<f32>(0.5);
+                                
+                                // 🔧 根据用户设置调整目标位置 | Adjust target position based on user settings
+                                // 如果设置为目标远端面，向外偏移半个体素；否则向内偏移
+                                // If set to target far face, offset outward by half voxel; otherwise offset inward
+                                if (uniforms.target_far_face_on_air_hit == 1u) {
+                                    hit_pos += normal * 0.5;
+                                } else {
+                                    hit_pos -= normal * 0.5;
+                                }
+                                
+                                // ✅ 记录击中 | Record hit
+                                output.hit = 1u;
+                                output.aim_pos = vec4<f32>(hit_pos, 1.0);
+                                return;
+                            }
+                        } else {
+                            // 🚫 超出边界，停止追踪 | Out of bounds, stop tracing
+                            break;
+                        }
+                    }
+                }
+            `;
              // ==================================================
              // 📦 GPU缓冲区创建 | GPU Buffer Creation
              // ==================================================
