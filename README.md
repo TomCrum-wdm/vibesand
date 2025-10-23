@@ -84,22 +84,28 @@ VibeSand implements **two distinct camera modes**:
   ```
 
 ##### **First Person Camera Mode**
-- **Architecture**: FPS-style camera with WASD movement and mouse look
-- **Implementation**: Position-based with yaw/pitch orientation (noclip movement)
+- **Architecture**: FPS-style camera with WASD movement, mouse look, and physics-based player voxel
+- **Implementation**: Bi-directional binding between camera and player voxel with collision detection
 - **Controls**:
-  - WASD: Move forward/left/backward/right
-  - Space: Move up
+  - WASD: Move forward/left/backward/right (applies force to player voxel)
+  - Space: Jump (upward movement)
   - Mouse: Look around (pointer lock API)
   - Left-click: Use tool at crosshair
 - **Camera State**:
   ```javascript
   firstPersonCamera = {
-    position: [64, 35, 64], // 3D position
+    position: [64, 35, 64], // 3D position (follows player voxel)
     yaw: -π/2,              // Horizontal rotation
     pitch: 0,                // Vertical rotation
     speed: 20.0              // Movement speed
   }
+  playerVoxelPosition = [64, 35, 64];  // Actual player voxel position from GPU
+  playerMoveIntent = [0, 0, 0];        // Movement intent from WASD input
   ```
+- **Bi-Directional Binding System**:
+  1. **Input → Player Voxel**: WASD keys calculate movement intent, applied to player voxel on GPU
+  2. **Player Voxel → Camera**: Player position read back from GPU, camera follows with eye height offset
+  3. **Physics Integration**: Player voxel affected by gravity, collision, and terrain
 - **View Direction Calculation**:
   ```javascript
   forward = [
@@ -111,14 +117,15 @@ VibeSand implements **two distinct camera modes**:
 - **Features**:
   - Crosshair HUD overlay
   - Pointer lock for seamless mouse look
-  - Noclip movement (camera passes through voxels freely)
-  - **Player voxel physics system**:
-    - Bright green player voxel spawned at camera position
-    - Player voxel affected by gravity and collision (like sand)
-    - Falls, slides diagonally, swaps with water
-    - GPU-tracked with zero CPU readback (pure GPU pipeline)
+  - **Physics-based FPS movement**:
+    - Bright green player voxel represents player body
+    - Camera position = player voxel position + 1.6 voxel units (eye height)
+    - Player voxel affected by gravity (falls when no ground)
+    - Collision detection: blocked by stone/sand, passes through air/water
+    - Falls, slides diagonally down slopes, swaps with water
+    - GPU-tracked with async CPU readback (1-frame latency)
     - Automatically respawns if destroyed or falls off world
-    - Independent from camera (camera uses noclip, voxel uses physics)
+    - True FPS game behavior: camera follows physics-simulated player
 
 **Camera Shared Systems:**
 - Both modes calculate `currentRight`, `currentUp`, `currentForward` vectors
@@ -144,10 +151,14 @@ All physics runs on the GPU using compute shaders:
 - Stone: Static solid, never moves
 - Sand: Falls, slides diagonally, tumbles, swaps with water
 - Water: Falls, flows, spreads horizontally with pressure
-- **Player**: Behaves identically to sand (gravity, collision, sliding, water swapping)
+- **Player**: Physics-simulated voxel controlled by player input in first-person mode
   - Bright green color (RGB: 0.2, 0.8, 0.2) for high visibility
   - Spawned automatically in first-person mode
-  - GPU-managed with zero CPU readback
+  - Responds to WASD movement intent with collision detection
+  - Affected by gravity (falls, slides) like sand
+  - Can move through air/water, blocked by stone/sand
+  - GPU position tracked with async CPU readback (1-frame latency)
+  - Camera position bound to player voxel position + eye height offset
   - Protected from deletion at y=0 (respawns if lost)
 - Air: Empty space
 
@@ -155,12 +166,13 @@ All physics runs on the GPU using compute shaders:
 
 **Multi-Pass GPU Architecture:**
 1. **Targeting Pass** - GPU raycast finds cursor 3D position
-1.5. **Player Management Pass** - Spawn/maintain player voxel (first-person mode only)
-2. **Physics Passes** - Multiple simulation steps per frame (player voxel falls with gravity)
+1.5. **Player Management Pass** - Apply player movement intent with collision detection (first-person mode only)
+2. **Physics Passes** - Multiple simulation steps per frame (player voxel affected by gravity, slides, falls)
 2.5. **Player Tracking Pass** - GPU scan to locate player voxel after physics (first-person mode only)
 3. **Tool Application** - Modify voxels based on user input
 4. **Lighting Pass** - Calculate light contributions from 32 dynamic point lights
 5. **Render Pass** - Single-pass DDA raymarching renders the scene
+6. **Position Readback** - Async GPU→CPU transfer of player voxel position (first-person mode only)
 
 **DDA Raymarching:**
 - Optimized voxel traversal algorithm
@@ -191,9 +203,15 @@ Bits 24-31: Blue light channel (8 bits)
 
 ### Key Features
 
-- **Zero CPU Readback**: All raycasting, physics, player tracking, and rendering on GPU
+- **Bi-Directional Camera-Player Binding**: First-person camera bound to physics-simulated player voxel
+  - Player input (WASD) applies movement intent to player voxel on GPU
+  - Player voxel responds to physics (gravity, collision, terrain)
+  - Camera position follows player voxel with eye height offset
+  - Async GPU→CPU position readback with 1-frame latency
+  - True FPS game physics: falls, jumps, collides with terrain
+- **GPU-First Architecture**: Minimal CPU involvement, all simulation and rendering on GPU
 - **Atomic Operations**: Lock-free parallel physics using atomics
-- **Player Voxel Physics**: GPU-managed player representation with gravity and collision
+- **Player Voxel Physics**: GPU-managed player with collision detection and gravity
 - **Dynamic Lighting**: 32 falling colored point lights ("light rain")
 - **Interactive Tools**: Brush-based painting system with preview
 - **Resolution Scaling**: Adjustable render resolution for performance
