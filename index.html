@@ -1709,18 +1709,18 @@
                                             atomicStore(&voxels[new_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, player_voxel.light));
                                             atomicStore(&voxels[last_idx].data, target_voxel_data);
                                             
-                                            // Update position tracking
+                                            // Update position tracking - keep found flag set to 1 since player still exists
                                             atomicStore(&player_pos_output[0], new_pos.x);
                                             atomicStore(&player_pos_output[1], new_pos.y);
                                             atomicStore(&player_pos_output[2], new_pos.z);
-                                            atomicStore(&player_pos_output[3], 0u);
+                                            // Keep found_flag = 1 so next frame can find player immediately
                                             return;
                                         }
                                     }
                                 }
                                 
-                                // Couldn't move (blocked by solid), just clear found flag
-                                atomicStore(&player_pos_output[3], 0u);
+                                // Couldn't move (blocked by solid), but player still exists at last_pos
+                                // Keep found flag set so we can try again next frame
                                 return;
                             }
                         }
