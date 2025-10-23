@@ -2087,6 +2087,10 @@
                  size: 16,  // vec4<u32> = 16 bytes (x, y, z, found_flag)
                  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
              });
+             // 初始化玩家位置缓冲区为0 | Initialize player position buffer to zeros
+             // 这很重要：found_flag (position 3) 必须初始化为0，否则shader会读取垃圾数据
+             // This is critical: found_flag (position 3) must be initialized to 0, otherwise shader reads garbage data
+             device.queue.writeBuffer(playerPosBuffer, 0, new Uint32Array([0, 0, 0, 0]));
              
              // 玩家位置读取缓冲区 | Player position readback buffer  
              // 用于从GPU读回玩家位置到CPU | Used to read back player position from GPU to CPU
@@ -2551,43 +2555,46 @@
                 
                 // 🎯 步骤1: 计算移动意图 | Step 1: Calculate movement intent
                 // 这会在GPU上应用到玩家体素 | This will be applied to player voxel on GPU
-                let moveDir = [0, 0, 0];
+                let horizontalMoveDir = [0, 0];  // X and Z movement
+                let verticalMove = 0;  // Y movement (jump)
                 
-                // WASD movement in camera's local space
+                // WASD movement in camera's local space (horizontal only)
                 if (keyState.w) {
-                    moveDir[0] += Math.cos(firstPersonCamera.yaw);
-                    moveDir[2] += Math.sin(firstPersonCamera.yaw);
+                    horizontalMoveDir[0] += Math.cos(firstPersonCamera.yaw);
+                    horizontalMoveDir[1] += Math.sin(firstPersonCamera.yaw);
                 }
                 if (keyState.s) {
-                    moveDir[0] -= Math.cos(firstPersonCamera.yaw);
-                    moveDir[2] -= Math.sin(firstPersonCamera.yaw);
+                    horizontalMoveDir[0] -= Math.cos(firstPersonCamera.yaw);
+                    horizontalMoveDir[1] -= Math.sin(firstPersonCamera.yaw);
                 }
                 if (keyState.a) {
-                    moveDir[0] -= Math.sin(firstPersonCamera.yaw);
-                    moveDir[2] += Math.cos(firstPersonCamera.yaw);
+                    horizontalMoveDir[0] -= Math.sin(firstPersonCamera.yaw);
+                    horizontalMoveDir[1] += Math.cos(firstPersonCamera.yaw);
                 }
                 if (keyState.d) {
-                    moveDir[0] += Math.sin(firstPersonCamera.yaw);
-                    moveDir[2] -= Math.cos(firstPersonCamera.yaw);
+                    horizontalMoveDir[0] += Math.sin(firstPersonCamera.yaw);
+                    horizontalMoveDir[1] -= Math.cos(firstPersonCamera.yaw);
                 }
                 
-                // Space for jump/upward movement
+                // Space for jump/upward movement (independent of horizontal movement)
+                // 跳跃力度独立于水平移动，不会被归一化削弱 | Jump force independent of horizontal movement, won't be weakened by normalization
                 if (keyState.space) {
-                    moveDir[1] += 1.0;
+                    verticalMove = firstPersonCamera.jumpVelocity;  // 使用专用的跳跃速度 | Use dedicated jump velocity
                 }
                 
-                // Normalize movement direction to prevent faster diagonal movement
-                const moveMagnitude = Math.sqrt(moveDir[0] * moveDir[0] + moveDir[1] * moveDir[1] + moveDir[2] * moveDir[2]);
-                if (moveMagnitude > 0) {
-                    moveDir[0] /= moveMagnitude;
-                    moveDir[1] /= moveMagnitude;
-                    moveDir[2] /= moveMagnitude;
+                // Normalize horizontal movement to prevent faster diagonal movement
+                // 只归一化水平移动，保持跳跃力度不变 | Only normalize horizontal movement, keep jump force unchanged
+                const horizontalMagnitude = Math.sqrt(horizontalMoveDir[0] * horizontalMoveDir[0] + horizontalMoveDir[1] * horizontalMoveDir[1]);
+                if (horizontalMagnitude > 0) {
+                    horizontalMoveDir[0] /= horizontalMagnitude;
+                    horizontalMoveDir[1] /= horizontalMagnitude;
                 }
                 
                 // 存储移动意图（将在GPU上应用）| Store movement intent (will be applied on GPU)
-                playerMoveIntent[0] = moveDir[0] * firstPersonCamera.speed * deltaTime;
-                playerMoveIntent[1] = moveDir[1] * firstPersonCamera.speed * deltaTime;
-                playerMoveIntent[2] = moveDir[2] * firstPersonCamera.speed * deltaTime;
+                // 水平移动使用speed，垂直移动使用jumpVelocity | Horizontal uses speed, vertical uses jumpVelocity
+                playerMoveIntent[0] = horizontalMoveDir[0] * firstPersonCamera.speed * deltaTime;
+                playerMoveIntent[1] = verticalMove * deltaTime;  // Jump is independent
+                playerMoveIntent[2] = horizontalMoveDir[1] * firstPersonCamera.speed * deltaTime;
                 
                 // 🎯 步骤2: 更新相机位置跟随玩家体素 | Step 2: Update camera position to follow player voxel
                 // 使用从GPU读回的玩家体素位置 | Use player voxel position read back from GPU
