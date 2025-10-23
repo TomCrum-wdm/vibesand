@@ -1738,11 +1738,11 @@
                         // This ensures player is always visible near camera
                         atomicStore(&voxels[spawn_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
                         
-                        // Update player position output with found flag cleared for next search
+                        // Update player position output with found flag set to 1 since we just spawned it
                         atomicStore(&player_pos_output[0], spawn_pos.x);
                         atomicStore(&player_pos_output[1], spawn_pos.y);
                         atomicStore(&player_pos_output[2], spawn_pos.z);
-                        atomicStore(&player_pos_output[3], 0u);
+                        atomicStore(&player_pos_output[3], 1u);
                     }
                 }
             `;
