@@ -555,7 +555,7 @@
          <h4>Controls</h4>
          <ul style="font-size: 12px;">
             <li><strong>Orbital Mode:</strong> Right-click to orbit, Middle/Space+Left to pan, Wheel to zoom</li>
-            <li><strong>First Person Mode:</strong> WASD to move, Space to jump, Mouse to look (Physics-based: player falls with gravity, collides with terrain, auto-jumps over 1-block obstacles)</li>
+            <li><strong>First Person Mode:</strong> WASD to move, Space to jump, Mouse to look (Smooth Minecraft-like movement: instant response, realistic physics, auto-climbs stairs)</li>
          </ul>
          <p class="credits">
             Vibecoded <span id="currentDate"></span> by
@@ -1052,10 +1052,6 @@
              // 更大的值 = 平移更快 | Larger value = faster panning
              const PAN_SENSITIVITY = 0.1;
              
-             // 🧍 第一人称玩家物理参数 | First-Person Player Physics Parameters
-             const PLAYER_HEIGHT = 1.8;      // 玩家高度(体素单位) | Player height in voxel units
-             const PLAYER_RADIUS = 0.4;      // 玩家碰撞半径 | Player collision radius
-             const PLAYER_EYE_HEIGHT = 1.6;  // 眼睛高度 | Eye height from feet
 
              // 🛠️ 工具类型常量 | Tool Type Constants
              // 这些常量定义了不同的绘制工具 | These constants define different painting tools
@@ -1175,17 +1171,41 @@
              let currentCamX=0, currentCamY=0, currentCamZ=0;
              let currentForward=[0,0,1], currentRight=[1,0,0], currentUp=[0,1,0];
              let cameraMode = 'orbital'; // 'orbital' or 'firstperson'
-             let firstPersonCamera = {
-                position: [VOXEL_GRID_SIZE / 2, VOXEL_GRID_SIZE - 10, VOXEL_GRID_SIZE / 2], // Spawn high above terrain
-                yaw: -Math.PI / 2, // Looking towards +X initially
-                pitch: 0,
+            
+            // ==================================================
+            // 🎮 NEW CPU-Based Player Controller | 新的CPU玩家控制器
+            // ==================================================
+            // Smooth, responsive Minecraft-like movement with continuous collision
+            // 流畅、响应灵敏的类Minecraft移动，带连续碰撞检测
+            let player = {
+                // 连续位置 (浮点数，非体素对齐) | Continuous position (float, not voxel-aligned)
+                position: [VOXEL_GRID_SIZE / 2, VOXEL_GRID_SIZE - 10, VOXEL_GRID_SIZE / 2],
+                // 速度向量 | Velocity vector
                 velocity: [0, 0, 0],
-                speed: 20.0,
-                jumpVelocity: 18.0,  // Increased from 8.0 to overcome gravity better and enable jumping
-                gravity: -20.0,
+                // 视角方向 | View direction
+                yaw: -Math.PI / 2,
+                pitch: 0,
+                // 物理状态 | Physics state
                 isGrounded: false,
-                height: 1.8,
-             };
+                // 碰撞盒尺寸 | Collision box dimensions
+                width: 0.6,    // X and Z axis width (player width)
+                height: 1.8,   // Y axis height
+                eyeHeight: 1.62, // Eye position from feet (slightly below full height)
+                // 移动参数 | Movement parameters
+                walkSpeed: 4.317,      // blocks per second (Minecraft walking speed)
+                sprintSpeed: 5.612,    // blocks per second (not implemented yet)
+                jumpVelocity: 8.0,     // blocks per second upward
+                gravity: 32.0,         // blocks per second² downward
+                // 地面移动 | Ground movement
+                groundAcceleration: 100.0,  // How fast to reach target speed
+                groundFriction: 20.0,       // How fast to stop
+                // 空中移动 | Air movement  
+                airAcceleration: 20.0,      // Air control (less than ground)
+                airFriction: 2.0,           // Minimal air drag
+                // 阶梯自动攀爬 | Step climbing
+                stepHeight: 0.6,       // Can step up this high automatically
+            };
+            
              let keyState = {
                 w: false, a: false, s: false, d: false, space: false, shift: false,
              };
@@ -1274,7 +1294,6 @@
                  const VOXEL_TYPE_STONE = 1u;    // 石头(固体) | Stone (solid)
                  const VOXEL_TYPE_SAND = 2u;     // 沙子(会下落) | Sand (falls)
                  const VOXEL_TYPE_WATER = 3u;    // 水(流动) | Water (flows)
-                 const VOXEL_TYPE_PLAYER = 4u;   // 玩家(受物理影响) | Player (affected by physics)
 
                  // 🛠️ 工具类型常量 | Tool Type Constants
                  const TOOL_TYPE_SAND = 0u;
@@ -1447,13 +1466,11 @@
                          return;
                      }
 
-                     // Don't delete player voxel if it reaches bottom, but delete other loose voxels
-                     if (global_id.y == 0u) {
-                         if (current_type != VOXEL_TYPE_PLAYER) {
-                             atomicStore(&voxels[current_idx].data, 0u);
-                         }
-                         return;
-                     }
+                    // Delete loose voxels at bottom
+                    if (global_id.y == 0u) {
+                        atomicStore(&voxels[current_idx].data, 0u);
+                        return;
+                    }
 
                      // PRIORITY 1: Direct Vertical Fall
                      let pos_below = global_id - vec3(0u, 1u, 0u);
@@ -1462,7 +1479,7 @@
                          let type_below = getVoxelType(atomicLoad(&voxels[idx_below].data));
                          if (type_below == VOXEL_TYPE_AIR) {
                              if (attempt_move(current_idx, idx_below, initial_data)) { return; }
-                         } else if ((current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) && type_below == VOXEL_TYPE_WATER) {
+                         } else if ((current_type == VOXEL_TYPE_SAND ) && type_below == VOXEL_TYPE_WATER) {
                              if (attempt_swap(current_idx, idx_below, initial_data)) { return; }
                          }
                      }
@@ -1471,7 +1488,7 @@
 
                      // PRIORITY 2: Diagonal Fall
                      if (global_id.y > 0u) {
-                         if (current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) {
+                         if (current_type == VOXEL_TYPE_SAND ) {
                              let DIAGONAL_SLIDES_SAND = array<vec3<i32>, 8>(
                                  vec3(1,-1,0), vec3(-1,-1,0), vec3(0,-1,1), vec3(0,-1,-1),
                                  vec3(1,-1,1), vec3(-1,-1,1), vec3(1,-1,-1), vec3(-1,-1,-1)
@@ -1637,231 +1654,6 @@
                  }
              `;
 
-            const findPlayerShaderCode = `
-                ${commonShaderCode}
-                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                @group(0) @binding(1) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>; // xyz position + found flag
-                
-                @compute @workgroup_size(4, 4, 4)
-                fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-                    let idx = pos_to_idx(id);
-                    if (idx != 0xFFFFFFFFu) {
-                        let v_type = getVoxelType(atomicLoad(&voxels[idx].data));
-                        if (v_type == VOXEL_TYPE_PLAYER) {
-                            // Found the player voxel, write its position atomically
-                            // Only first thread to find player will write (race is acceptable)
-                            atomicStore(&player_pos_output[0], id.x);
-                            atomicStore(&player_pos_output[1], id.y);
-                            atomicStore(&player_pos_output[2], id.z);
-                            atomicStore(&player_pos_output[3], 1u);
-                        }
-                    }
-                }
-            `;
-
-            const managePlayerShaderCode = `
-                ${commonShaderCode}
-                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
-                @group(0) @binding(2) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>;
-                
-                // Check if there's a 1-block obstacle ahead of player that requires auto-jump
-                fn shouldAutoJump(player_pos: vec3<u32>, horizontal_move: vec2<f32>) -> bool {
-                    // Only check for auto-jump if there's horizontal movement
-                    let move_magnitude = length(horizontal_move);
-                    if (move_magnitude < 0.01) {
-                        return false;
-                    }
-                    
-                    // Normalize horizontal direction to get the forward direction
-                    let forward_dir = normalize(horizontal_move);
-                    
-                    // Check 1 block ahead in the movement direction
-                    let check_offset = vec3<i32>(
-                        i32(round(forward_dir.x)),
-                        0,
-                        i32(round(forward_dir.y))
-                    );
-                    
-                    let ahead_pos = vec3<i32>(player_pos) + check_offset;
-                    let above_ahead_pos = ahead_pos + vec3<i32>(0, 1, 0);
-                    let below_pos = vec3<i32>(player_pos) - vec3<i32>(0, 1, 0);
-                    
-                    // Check if positions are within bounds
-                    if (any(ahead_pos < vec3<i32>(0)) || any(ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
-                        any(above_ahead_pos < vec3<i32>(0)) || any(above_ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
-                        any(below_pos < vec3<i32>(0))) {
-                        return false;
-                    }
-                    
-                    let ahead_idx = pos_to_idx(vec3<u32>(ahead_pos));
-                    let above_ahead_idx = pos_to_idx(vec3<u32>(above_ahead_pos));
-                    let below_idx = pos_to_idx(vec3<u32>(below_pos));
-                    
-                    if (ahead_idx == 0xFFFFFFFFu || above_ahead_idx == 0xFFFFFFFFu || below_idx == 0xFFFFFFFFu) {
-                        return false;
-                    }
-                    
-                    // Get voxel types
-                    let ahead_type = getVoxelType(atomicLoad(&voxels[ahead_idx].data));
-                    let above_ahead_type = getVoxelType(atomicLoad(&voxels[above_ahead_idx].data));
-                    let below_type = getVoxelType(atomicLoad(&voxels[below_idx].data));
-                    
-                    // Auto-jump conditions:
-                    // 1. There's solid ground below player (standing on something)
-                    // 2. There's a solid block ahead (obstacle)
-                    // 3. There's air above the obstacle (can jump over it)
-                    let has_ground = (below_type == VOXEL_TYPE_STONE || below_type == VOXEL_TYPE_SAND);
-                    let has_obstacle = (ahead_type == VOXEL_TYPE_STONE || ahead_type == VOXEL_TYPE_SAND);
-                    let has_space_above = (above_ahead_type == VOXEL_TYPE_AIR || above_ahead_type == VOXEL_TYPE_WATER);
-                    
-                    return has_ground && has_obstacle && has_space_above;
-                }
-                
-                @compute @workgroup_size(1, 1, 1)
-                fn main() {
-                    // Get desired movement from uniforms (stored in camera_target_pos for convenience)
-                    var move_intent = tool_info.camera_target_pos;
-                    let camera_pos = tool_info.camera_position;
-                    
-                    // Check if player voxel already exists at last known position
-                    let last_found = atomicLoad(&player_pos_output[3]);
-                    if (last_found == 1u) {
-                        let last_pos = vec3<u32>(
-                            atomicLoad(&player_pos_output[0]),
-                            atomicLoad(&player_pos_output[1]),
-                            atomicLoad(&player_pos_output[2])
-                        );
-                        let last_idx = pos_to_idx(last_pos);
-                        if (last_idx != 0xFFFFFFFFu) {
-                            let voxel_data = atomicLoad(&voxels[last_idx].data);
-                            if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
-                                // Check for auto-jump (only if not already jumping upward)
-                                if (move_intent.y <= 0.0) {
-                                    let horizontal_move = vec2<f32>(move_intent.x, move_intent.z);
-                                    if (shouldAutoJump(last_pos, horizontal_move)) {
-                                        // Auto-jump! Add upward movement
-                                        move_intent.y = 0.15;  // Auto-jump velocity (slightly less than manual jump)
-                                    }
-                                }
-                                
-                                // Player voxel exists! Apply movement intent
-                                // Calculate target position based on current position + movement
-                                let current_pos_f = vec3<f32>(last_pos) + vec3<f32>(0.5); // Center of voxel
-                                let new_pos_f = current_pos_f + move_intent;
-                                let new_pos = vec3<u32>(
-                                    clamp(u32(floor(new_pos_f.x)), 0u, GRID_DIM - 1u),
-                                    clamp(u32(floor(new_pos_f.y)), 0u, GRID_DIM - 1u),
-                                    clamp(u32(floor(new_pos_f.z)), 0u, GRID_DIM - 1u)
-                                );
-                                
-                                // Only move if target position is different and is air or water
-                                if (any(new_pos != last_pos)) {
-                                    let new_idx = pos_to_idx(new_pos);
-                                    if (new_idx != 0xFFFFFFFFu) {
-                                        let target_voxel_data = atomicLoad(&voxels[new_idx].data);
-                                        let target_type = getVoxelType(target_voxel_data);
-                                        
-                                        // Allow movement into air or water (swap with water)
-                                        if (target_type == VOXEL_TYPE_AIR || target_type == VOXEL_TYPE_WATER) {
-                                            // Get player voxel data (to preserve lighting)
-                                            let player_voxel = unpackVoxel(voxel_data);
-                                            
-                                            // Atomic swap: move player to new position, place target in old position
-                                            atomicStore(&voxels[new_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, player_voxel.light));
-                                            atomicStore(&voxels[last_idx].data, target_voxel_data);
-                                            
-                                            // Update position tracking - keep found flag set to 1 since player still exists
-                                            atomicStore(&player_pos_output[0], new_pos.x);
-                                            atomicStore(&player_pos_output[1], new_pos.y);
-                                            atomicStore(&player_pos_output[2], new_pos.z);
-                                            // Keep found_flag = 1 so next frame can find player immediately
-                                            return;
-                                        }
-                                    }
-                                }
-                                
-                                // Couldn't move (blocked by solid), but player still exists at last_pos
-                                // Keep found flag set so we can try again next frame
-                                return;
-                            }
-                        }
-                    }
-                    
-                    // Player voxel doesn't exist (fell off or was destroyed), create new one at camera position
-                    let spawn_pos = vec3<u32>(
-                        clamp(u32(floor(camera_pos.x)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.y)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.z)), 0u, GRID_DIM - 1u)
-                    );
-                    let spawn_idx = pos_to_idx(spawn_pos);
-                    if (spawn_idx != 0xFFFFFFFFu) {
-                        // Always try to place player voxel, even if occupied (will replace)
-                        // This ensures player is always visible near camera
-                        atomicStore(&voxels[spawn_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
-                        
-                        // Update player position output with found flag set to 1 since we just spawned it
-                        atomicStore(&player_pos_output[0], spawn_pos.x);
-                        atomicStore(&player_pos_output[1], spawn_pos.y);
-                        atomicStore(&player_pos_output[2], spawn_pos.z);
-                        atomicStore(&player_pos_output[3], 1u);
-                    }
-                }
-            `;
-
-             const targetingShaderCode = `
-                 ${commonShaderCode}
-                 @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                 @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
-                 @group(0) @binding(2) var<storage, read_write> output: TargetingOutput;
-                 fn intersect_aabb(ro: vec3<f32>, rd: vec3<f32>, min_b: vec3<f32>, max_b: vec3<f32>) -> vec2<f32> {
-                     let inv_rd = 1.0 / rd; let t1 = (min_b - ro) * inv_rd; let t2 = (max_b - ro) * inv_rd;
-                     let t_min = max(max(min(t1.x, t2.x), min(t1.y, t2.y)), min(t1.z, t2.z));
-                     let t_max = min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z));
-                     return vec2(t_min, t_max);
-                 }
-                 @compute @workgroup_size(1, 1, 1)
-                 fn main() {
-                     output.hit = 0u;
-                     var ray_origin = tool_info.camera_position;
-                     let cam_fwd = normalize(tool_info.camera_target_pos - ray_origin);
-                     let aspect_ratio = tool_info.canvas_dims.x / tool_info.canvas_dims.y;
-                     let ray_dir = normalize(tool_info.camera_right * ((tool_info.mouse_pos.x/tool_info.canvas_dims.x)-0.5)*2.0*aspect_ratio + tool_info.camera_up * ((tool_info.mouse_pos.y/tool_info.canvas_dims.y)-0.5)*-2.0 + cam_fwd*tool_info.camera_zoom);
-                     let t_bounds = intersect_aabb(ray_origin, ray_dir, vec3(0.0), vec3(f32(GRID_DIM)));
-
-                     if (t_bounds.x >= t_bounds.y || t_bounds.y < 0.0 ) { return; }
-
-                     var dda_pos = ray_origin + ray_dir * (max(0.0, t_bounds.x) - 0.001);
-                     var map_pos = vec3<i32>(floor(dda_pos));
-                     let step = vec3<i32>(sign(ray_dir));
-                     let delta = abs(1.0 / (ray_dir + 1e-6));
-                     var side = (sign(ray_dir) * (vec3<f32>(map_pos) - dda_pos) + (sign(ray_dir) * 0.5 + 0.5)) * delta;
-                     var last_map_pos = map_pos;
-
-                     for (var i = 0u; i < tool_info.max_ray_steps_compute; i = i + 1u) {
-                         last_map_pos = map_pos;
-                         if (side.x < side.y && side.x < side.z) { side.x += delta.x; map_pos.x += step.x; }
-                         else if (side.y < side.z) { side.y += delta.y; map_pos.y += step.y; }
-                         else { side.z += delta.z; map_pos.z += step.z; }
-
-                         let idx = pos_to_idx(vec3<u32>(map_pos));
-                         if (idx != 0xFFFFFFFFu && getVoxelType(atomicLoad(&voxels[idx].data)) != VOXEL_TYPE_AIR) {
-                             var hit_pos_f = select(vec3<f32>(last_map_pos), vec3<f32>(map_pos), tool_info.tool_type == TOOL_TYPE_DESTROY);
-                             output.aim_pos = vec4(hit_pos_f + 0.5, 0.0);
-                             output.hit = 1u;
-                             return;
-                         }
-                         if (any(map_pos < vec3<i32>(0)) || any(map_pos >= vec3<i32>(i32(GRID_DIM)))) { break; }
-                     }
-
-                     let dist_to_bbox_hit: f32 = select(max(0.0, t_bounds.x), t_bounds.y, tool_info.target_far_face_on_air_hit == 1u);
-                     let hit_pos_on_bbox = ray_origin + ray_dir * dist_to_bbox_hit;
-                     let target_point_for_placement: vec3<f32> = select(hit_pos_on_bbox + ray_dir * 0.501, hit_pos_on_bbox - ray_dir * 0.501, tool_info.target_far_face_on_air_hit == 1u);
-                     output.aim_pos = vec4(clamp(target_point_for_placement, vec3(0.0), vec3(f32(GRID_DIM) - 1.0)), 0.0);
-                     output.hit = 1u;
-                 }
-             `;
-
              const renderShaderCode = `
                  ${commonShaderCode}
                  @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
@@ -1876,9 +1668,6 @@
                      }
                      if (voxel.v_type == VOXEL_TYPE_SAND) {
                          return vec3(0.8, 0.7, 0.4) + (variant_f - 0.5) * 0.1;
-                     }
-                     if (voxel.v_type == VOXEL_TYPE_PLAYER) {
-                         return vec3(0.2, 0.8, 0.2); // Bright green for player visibility
                      }
                      if (is_water) {
                          return vec3(0.15, 0.45, 0.85); // Flat base color for water, variant removed
@@ -2145,34 +1934,6 @@
              
              // 🧍 玩家位置输出缓冲区 | Player position output buffer
              // 存储GPU找到的玩家体素位置 | Stores player voxel position found by GPU
-             const playerPosBuffer = device.createBuffer({
-                 size: 16,  // vec4<u32> = 16 bytes (x, y, z, found_flag)
-                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
-             });
-             // 初始化玩家位置缓冲区为0 | Initialize player position buffer to zeros
-             // 这很重要：found_flag (position 3) 必须初始化为0，否则shader会读取垃圾数据
-             // This is critical: found_flag (position 3) must be initialized to 0, otherwise shader reads garbage data
-             device.queue.writeBuffer(playerPosBuffer, 0, new Uint32Array([0, 0, 0, 0]));
-             
-             // 玩家位置读取缓冲区 | Player position readback buffer  
-             // 用于从GPU读回玩家位置到CPU | Used to read back player position from GPU to CPU
-             const playerPosReadBuffer = device.createBuffer({
-                 size: 16,
-                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-             });
-             
-             // Flag to track if a map operation is pending on playerPosReadBuffer
-             // 标志位：追踪玩家位置缓冲区是否有待处理的映射操作
-             let playerPosMapPending = false;
-             
-             // 🎮 玩家体素位置跟踪 | Player voxel position tracking
-             // 从GPU读回的实际玩家位置 | Actual player position read back from GPU
-             let playerVoxelPosition = [64, 35, 64];  // 初始位置 | Initial position
-             let playerVoxelFound = false;  // 是否找到玩家体素 | Whether player voxel was found
-             
-             // 🎮 玩家移动意图 | Player movement intent
-             // 存储玩家想要移动的方向（由WASD控制）| Store the direction player wants to move (controlled by WASD)
-             let playerMoveIntent = [0, 0, 0];  // x, y, z movement intent
              
              // 💡 光源统一缓冲区 | Lights uniform buffer
              // 存储所有动态点光源的数据 | Stores data for all dynamic point lights
@@ -2257,25 +2018,6 @@
                  }
              });
              
-             // 🔍 寻找玩家管线 | Find player pipeline
-             // 用途: GPU扫描找到玩家体素位置 | Purpose: GPU scan to find player voxel position
-             const findPlayerPipeline = device.createComputePipeline({
-                 layout: 'auto',
-                 compute: {
-                     module: device.createShaderModule({ code: findPlayerShaderCode }),
-                     entryPoint: 'main'
-                 }
-             });
-             
-             // 🧍 管理玩家管线 | Manage player pipeline
-             // 用途: 创建/维护玩家体素 | Purpose: Create/maintain player voxel
-             const managePlayerPipeline = device.createComputePipeline({
-                 layout: 'auto',
-                 compute: {
-                     module: device.createShaderModule({ code: managePlayerShaderCode }),
-                     entryPoint: 'main'
-                 }
-             });
              
              // 🎨 渲染管线 | Render pipeline
              // 用途: 将3D体素世界渲染到2D屏幕 | Purpose: Render 3D voxel world to 2D screen
@@ -2376,26 +2118,6 @@
                  ]
              });
              
-             // 🔍 寻找玩家绑定组 | Find player bind group
-             // 绑定: 体素缓冲区(只读) + 玩家位置输出(写入) | Binds: voxel buffer + player position output
-             const findPlayerBindGroup = device.createBindGroup({
-                 layout: findPlayerPipeline.getBindGroupLayout(0),
-                 entries: [
-                     { binding: 0, resource: { buffer: voxelBuffer } },
-                     { binding: 1, resource: { buffer: playerPosBuffer } }
-                 ]
-             });
-             
-             // 🧍 管理玩家绑定组 | Manage player bind group
-             // 绑定: 体素缓冲区(读写) + 计算参数(只读) + 玩家位置输出(读写) | Binds: voxel buffer + compute params + player position
-             const managePlayerBindGroup = device.createBindGroup({
-                 layout: managePlayerPipeline.getBindGroupLayout(0),
-                 entries: [
-                     { binding: 0, resource: { buffer: voxelBuffer } },
-                     { binding: 1, resource: { buffer: computePassUniformsBuffer } },
-                     { binding: 2, resource: { buffer: playerPosBuffer } }
-                 ]
-             });
              
              // 🎨 渲染绑定组 | Render bind group
              // 绑定: 体素缓冲区(只读) + 渲染参数(只读) + 工具参数(只读) + 目标位置(只读)
@@ -2409,6 +2131,229 @@
                      { binding: 3, resource: { buffer: targetingOutputBuffer } } 
                  ]
              });
+
+            // ==================================================
+            // 🎯 CPU-Based Player Physics and Collision | CPU玩家物理和碰撞
+            // ==================================================
+            
+            // Helper to read voxel from GPU buffer (CPU side, async - only for debugging)
+            // We'll use a synchronous approach by maintaining a CPU shadow copy during generation
+            let voxelShadow = null; // Will store voxel data for CPU collision checks
+            
+            /**
+             * Check if a voxel position is solid (blocks movement)
+             * @param {number} x - Voxel X coordinate
+             * @param {number} y - Voxel Y coordinate
+             * @param {number} z - Voxel Z coordinate
+             * @returns {boolean} - True if solid
+             */
+            function isVoxelSolid(x, y, z) {
+                // Clamp to grid bounds
+                if (x < 0 || x >= VOXEL_GRID_SIZE || y < 0 || y >= VOXEL_GRID_SIZE || z < 0 || z >= VOXEL_GRID_SIZE) {
+                    return true; // Out of bounds is solid
+                }
+                
+                const vx = Math.floor(x);
+                const vy = Math.floor(y);
+                const vz = Math.floor(z);
+                
+                // Calculate voxel index
+                const idx = vx + vy * VOXEL_GRID_SIZE + vz * VOXEL_GRID_SIZE * VOXEL_GRID_SIZE;
+                
+                // Read from shadow buffer if available
+                if (voxelShadow && idx < voxelShadow.length) {
+                    const voxelData = voxelShadow[idx];
+                    const voxelType = voxelData & 0x7; // Extract type from bits 0-2
+                    // Types: 0=AIR, 1=STONE, 2=SAND, 3=WATER, 4=PLAYER
+                    // Solid types: STONE (1), SAND (2)
+                    return voxelType === 1 || voxelType === 2;
+                }
+                
+                // Default to not solid if no shadow buffer (shouldn't happen)
+                return false;
+            }
+            
+            /**
+             * Check if AABB collides with any solid voxels
+             * @param {number} minX - Min X of bounding box
+             * @param {number} minY - Min Y of bounding box
+             * @param {number} minZ - Min Z of bounding box
+             * @param {number} maxX - Max X of bounding box
+             * @param {number} maxY - Max Y of bounding box
+             * @param {number} maxZ - Max Z of bounding box
+             * @returns {boolean} - True if collision detected
+             */
+            function checkAABBCollision(minX, minY, minZ, maxX, maxY, maxZ) {
+                // Check all voxels that the AABB overlaps
+                const startX = Math.floor(minX);
+                const startY = Math.floor(minY);
+                const startZ = Math.floor(minZ);
+                const endX = Math.floor(maxX);
+                const endY = Math.floor(maxY);
+                const endZ = Math.floor(maxZ);
+                
+                for (let x = startX; x <= endX; x++) {
+                    for (let y = startY; y <= endY; y++) {
+                        for (let z = startZ; z <= endZ; z++) {
+                            if (isVoxelSolid(x, y, z)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                return false;
+            }
+            
+            /**
+             * Update player physics and movement (Minecraft-style)
+             * @param {number} deltaTime - Time since last frame in seconds
+             */
+            function updatePlayerPhysics(deltaTime) {
+                if (cameraMode !== 'firstperson') return;
+                
+                // Clamp deltaTime to prevent huge jumps (max 0.1s = 10 FPS minimum)
+                deltaTime = Math.min(deltaTime, 0.1);
+                
+                // ==== Input Processing ====
+                // Calculate desired movement direction from WASD keys
+                let moveX = 0, moveZ = 0;
+                if (keyState.w) { moveX += Math.cos(player.yaw); moveZ += Math.sin(player.yaw); }
+                if (keyState.s) { moveX -= Math.cos(player.yaw); moveZ -= Math.sin(player.yaw); }
+                if (keyState.a) { moveX -= Math.sin(player.yaw); moveZ += Math.cos(player.yaw); }
+                if (keyState.d) { moveX += Math.sin(player.yaw); moveZ -= Math.cos(player.yaw); }
+                
+                // Normalize input to prevent faster diagonal movement
+                const inputMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+                if (inputMagnitude > 0) {
+                    moveX /= inputMagnitude;
+                    moveZ /= inputMagnitude;
+                }
+                
+                // ==== Ground Detection ====
+                // Check if player is on ground by testing slightly below feet
+                const feetY = player.position[1];
+                const halfWidth = player.width / 2;
+                player.isGrounded = checkAABBCollision(
+                    player.position[0] - halfWidth,
+                    feetY - 0.1,
+                    player.position[2] - halfWidth,
+                    player.position[0] + halfWidth,
+                    feetY,
+                    player.position[2] + halfWidth
+                );
+                
+                // ==== Horizontal Movement ====
+                const targetSpeed = player.walkSpeed;
+                const targetVelX = moveX * targetSpeed;
+                const targetVelZ = moveZ * targetSpeed;
+                
+                if (player.isGrounded) {
+                    // Ground movement: fast acceleration and friction
+                    const accel = player.groundAcceleration * deltaTime;
+                    const friction = player.groundFriction * deltaTime;
+                    
+                    // Accelerate towards target velocity
+                    player.velocity[0] += (targetVelX - player.velocity[0]) * Math.min(accel, 1.0);
+                    player.velocity[2] += (targetVelZ - player.velocity[2]) * Math.min(accel, 1.0);
+                    
+                    // Apply friction when not pressing any movement keys
+                    if (inputMagnitude === 0) {
+                        player.velocity[0] *= Math.max(0, 1 - friction);
+                        player.velocity[2] *= Math.max(0, 1 - friction);
+                    }
+                } else {
+                    // Air movement: limited control
+                    const airAccel = player.airAcceleration * deltaTime;
+                    player.velocity[0] += (targetVelX - player.velocity[0]) * Math.min(airAccel, 1.0);
+                    player.velocity[2] += (targetVelZ - player.velocity[2]) * Math.min(airAccel, 1.0);
+                }
+                
+                // ==== Jumping ====
+                if (keyState.space && player.isGrounded) {
+                    player.velocity[1] = player.jumpVelocity;
+                    player.isGrounded = false; // Prevent double jumping
+                }
+                
+                // ==== Gravity ====
+                if (!player.isGrounded) {
+                    player.velocity[1] -= player.gravity * deltaTime;
+                    // Terminal velocity (prevent infinite falling speed)
+                    player.velocity[1] = Math.max(player.velocity[1], -78.4); // Minecraft terminal velocity
+                }
+                
+                // ==== Collision Detection and Position Update ====
+                const newHalfWidth = player.width / 2;
+                
+                // Move X axis with collision
+                let newX = player.position[0] + player.velocity[0] * deltaTime;
+                if (!checkAABBCollision(
+                    newX - newHalfWidth, player.position[1], player.position[2] - newHalfWidth,
+                    newX + newHalfWidth, player.position[1] + player.height, player.position[2] + newHalfWidth
+                )) {
+                    player.position[0] = newX;
+                } else {
+                    player.velocity[0] = 0; // Stop horizontal movement on collision
+                }
+                
+                // Move Z axis with collision
+                let newZ = player.position[2] + player.velocity[2] * deltaTime;
+                if (!checkAABBCollision(
+                    player.position[0] - newHalfWidth, player.position[1], newZ - newHalfWidth,
+                    player.position[0] + newHalfWidth, player.position[1] + player.height, newZ + newHalfWidth
+                )) {
+                    player.position[2] = newZ;
+                } else {
+                    player.velocity[2] = 0; // Stop horizontal movement on collision
+                }
+                
+                // Move Y axis with collision
+                let newY = player.position[1] + player.velocity[1] * deltaTime;
+                if (!checkAABBCollision(
+                    player.position[0] - newHalfWidth, newY, player.position[2] - newHalfWidth,
+                    player.position[0] + newHalfWidth, newY + player.height, player.position[2] + newHalfWidth
+                )) {
+                    player.position[1] = newY;
+                } else {
+                    // Hit ceiling or floor
+                    if (player.velocity[1] < 0) {
+                        // Hit floor, snap to ground
+                        player.position[1] = Math.floor(player.position[1] + 0.001);
+                        player.isGrounded = true;
+                    }
+                    player.velocity[1] = 0;
+                }
+                
+                // ==== Step Climbing ====
+                // If blocked horizontally and on ground, try to step up
+                if ((player.velocity[0] !== 0 || player.velocity[2] !== 0) && player.isGrounded) {
+                    for (let stepUp = 0.1; stepUp <= player.stepHeight; stepUp += 0.1) {
+                        const testY = player.position[1] + stepUp;
+                        // Check if we can move horizontally at this height
+                        const canStepX = !checkAABBCollision(
+                            newX - newHalfWidth, testY, player.position[2] - newHalfWidth,
+                            newX + newHalfWidth, testY + player.height, player.position[2] + newHalfWidth
+                        );
+                        const canStepZ = !checkAABBCollision(
+                            player.position[0] - newHalfWidth, testY, newZ - newHalfWidth,
+                            player.position[0] + newHalfWidth, testY + player.height, newZ + newHalfWidth
+                        );
+                        if (canStepX || canStepZ) {
+                            // Step up!
+                            player.position[1] = testY;
+                            if (canStepX) player.position[0] = newX;
+                            if (canStepZ) player.position[2] = newZ;
+                            break;
+                        }
+                    }
+                }
+                
+                // ==== Boundary Clamping ====
+                // Prevent player from going out of world bounds
+                player.position[0] = Math.max(newHalfWidth, Math.min(VOXEL_GRID_SIZE - newHalfWidth, player.position[0]));
+                player.position[1] = Math.max(0, Math.min(VOXEL_GRID_SIZE - player.height, player.position[1]));
+                player.position[2] = Math.max(newHalfWidth, Math.min(VOXEL_GRID_SIZE - newHalfWidth, player.position[2]));
+            }
 
              function resizeCanvasAndContext() {
                  const newScale = parseFloat(document.getElementById('resolutionScale').value);
@@ -2434,6 +2379,33 @@
                  genPass.end();
                  device.queue.submit([commandEncoder.finish()]);
                  frameCount = 0;
+                 
+                 // Create shadow copy of voxel buffer for CPU collision detection
+                 // This needs to be done async after generation completes
+                 createVoxelShadow();
+             }
+             
+             // Helper function to create CPU shadow copy of voxel buffer
+             async function createVoxelShadow() {
+                 // Create a staging buffer for reading back voxel data
+                 const stagingBuffer = device.createBuffer({
+                     size: VOXEL_BUFFER_SIZE,
+                     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+                 });
+                 
+                 // Copy voxel buffer to staging buffer
+                 const commandEncoder = device.createCommandEncoder();
+                 commandEncoder.copyBufferToBuffer(voxelBuffer, 0, stagingBuffer, 0, VOXEL_BUFFER_SIZE);
+                 device.queue.submit([commandEncoder.finish()]);
+                 
+                 // Read back the data
+                 await stagingBuffer.mapAsync(GPUMapMode.READ);
+                 const arrayBuffer = stagingBuffer.getMappedRange();
+                 voxelShadow = new Uint32Array(arrayBuffer).slice(); // Copy the data
+                 stagingBuffer.unmap();
+                 stagingBuffer.destroy();
+                 
+                 console.log('Voxel shadow buffer created for collision detection');
              }
 
              runGeneration();
@@ -2572,9 +2544,9 @@
                  if (cameraMode === 'firstperson' && document.pointerLockElement === canvas) {
                     // First-person mouse look
                     const sensitivity = 0.002;
-                    firstPersonCamera.yaw -= e.movementX * sensitivity;
-                    firstPersonCamera.pitch -= e.movementY * sensitivity;
-                    firstPersonCamera.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, firstPersonCamera.pitch));
+                    player.yaw -= e.movementX * sensitivity;
+                    player.pitch -= e.movementY * sensitivity;
+                    player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
                  } else if (cameraMode === 'orbital') {
                     const dx = e.clientX - mouseState.lastX; const dy = e.clientY - mouseState.lastY;
                     const rect = canvas.getBoundingClientRect();
@@ -2612,63 +2584,6 @@
             // 🎮 Update first-person camera and player movement
             // 更新第一人称相机和玩家移动 | Update first-person camera and player movement
             // 相机绑定到玩家体素位置，键盘控制玩家体素移动 | Camera binds to player voxel position, keyboard controls player voxel movement
-            function updateFirstPersonCamera(deltaTime) {
-                if (cameraMode !== 'firstperson') return;
-                
-                // 🎯 步骤1: 计算移动意图 | Step 1: Calculate movement intent
-                // 这会在GPU上应用到玩家体素 | This will be applied to player voxel on GPU
-                let horizontalMoveDir = [0, 0];  // X and Z movement
-                let verticalMove = 0;  // Y movement (jump)
-                
-                // WASD movement in camera's local space (horizontal only)
-                if (keyState.w) {
-                    horizontalMoveDir[0] += Math.cos(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] += Math.sin(firstPersonCamera.yaw);
-                }
-                if (keyState.s) {
-                    horizontalMoveDir[0] -= Math.cos(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] -= Math.sin(firstPersonCamera.yaw);
-                }
-                if (keyState.a) {
-                    horizontalMoveDir[0] -= Math.sin(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] += Math.cos(firstPersonCamera.yaw);
-                }
-                if (keyState.d) {
-                    horizontalMoveDir[0] += Math.sin(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] -= Math.cos(firstPersonCamera.yaw);
-                }
-                
-                // Space for jump/upward movement (independent of horizontal movement)
-                // 跳跃力度独立于水平移动，不会被归一化削弱 | Jump force independent of horizontal movement, won't be weakened by normalization
-                if (keyState.space) {
-                    verticalMove = firstPersonCamera.jumpVelocity;  // 使用专用的跳跃速度 | Use dedicated jump velocity
-                }
-                
-                // Normalize horizontal movement to prevent faster diagonal movement
-                // 只归一化水平移动，保持跳跃力度不变 | Only normalize horizontal movement, keep jump force unchanged
-                const horizontalMagnitude = Math.sqrt(horizontalMoveDir[0] * horizontalMoveDir[0] + horizontalMoveDir[1] * horizontalMoveDir[1]);
-                if (horizontalMagnitude > 0) {
-                    horizontalMoveDir[0] /= horizontalMagnitude;
-                    horizontalMoveDir[1] /= horizontalMagnitude;
-                }
-                
-                // 存储移动意图（将在GPU上应用）| Store movement intent (will be applied on GPU)
-                // 水平移动使用speed，垂直移动使用jumpVelocity | Horizontal uses speed, vertical uses jumpVelocity
-                playerMoveIntent[0] = horizontalMoveDir[0] * firstPersonCamera.speed * deltaTime;
-                playerMoveIntent[1] = verticalMove * deltaTime;  // Jump is independent
-                playerMoveIntent[2] = horizontalMoveDir[1] * firstPersonCamera.speed * deltaTime;
-                
-                // 🎯 步骤2: 更新相机位置跟随玩家体素 | Step 2: Update camera position to follow player voxel
-                // 使用从GPU读回的玩家体素位置 | Use player voxel position read back from GPU
-                if (playerVoxelFound) {
-                    // 相机位置 = 玩家体素位置 + 眼睛高度偏移 | Camera position = player voxel position + eye height offset
-                    // 玩家体素在脚底，相机在眼睛高度 | Player voxel at feet, camera at eye height
-                    firstPersonCamera.position[0] = playerVoxelPosition[0] + 0.5;  // 体素中心 | Voxel center
-                    firstPersonCamera.position[1] = playerVoxelPosition[1] + PLAYER_EYE_HEIGHT;  // 眼睛高度 | Eye height
-                    firstPersonCamera.position[2] = playerVoxelPosition[2] + 0.5;  // 体素中心 | Voxel center
-                }
-            }
-
              let lastFrameTime = performance.now();
              
              // ==================================================
@@ -2682,27 +2597,27 @@
                  const deltaTime = (now - lastFrameTime) / 1000.0;  // 转换为秒 | Convert to seconds
                  
                  // 🎮 更新第一人称相机(如果在FPS模式) | Update first-person camera (if in FPS mode)
-                 updateFirstPersonCamera(deltaTime);
+                 updatePlayerPhysics(deltaTime);
                  
                  // 📷 根据相机模式计算相机位置和方向 | Calculate camera position and orientation based on mode
                  if (cameraMode === 'firstperson') {
                     // 第一人称模式: 直接使用位置和朝向 | First-person mode: use position and orientation directly
-                    currentCamX = firstPersonCamera.position[0];
-                    currentCamY = firstPersonCamera.position[1];
-                    currentCamZ = firstPersonCamera.position[2];
+                    currentCamX = player.position[0];
+                    currentCamY = player.position[1] + player.eyeHeight;
+                    currentCamZ = player.position[2];
                     
                     // 从yaw(水平)和pitch(垂直)角度计算前向量 | Calculate forward vector from yaw and pitch angles
                     currentForward = [
-                       Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
-                       Math.sin(firstPersonCamera.pitch),
-                       Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
+                       Math.cos(player.pitch) * Math.cos(player.yaw),
+                       Math.sin(player.pitch),
+                       Math.cos(player.pitch) * Math.sin(player.yaw)
                     ];
                     
                     // 计算右向量(直接从yaw角度计算) | Calculate right vector (directly from yaw angle)
                     currentRight = [
-                       Math.sin(firstPersonCamera.yaw),
+                       Math.sin(player.yaw),
                        0,
-                       -Math.cos(firstPersonCamera.yaw)
+                       -Math.cos(player.yaw)
                     ];
                     
                     // 计算上向量(叉乘) | Calculate up vector (cross product)
@@ -2796,12 +2711,7 @@
                  computeUBO.set([2.0], 3); 
                  computeUBO.set(currentRight, 4); 
                  computeUBO.set(currentUp, 8);
-                 // 在第一人称模式下，传递玩家移动意图；否则传递相机目标 | In first-person mode, pass player movement intent; otherwise pass camera target
-                 if (cameraMode === 'firstperson') {
-                     computeUBO.set(playerMoveIntent, 12);  // 玩家移动意图 | Player movement intent
-                 } else {
-                     computeUBO.set(cameraTarget, 12);
-                 }
+                computeUBO.set(cameraTarget, 12);
                  // 在第一人称模式下，始终瞄准屏幕中心 | In first-person mode, always aim at screen center
                  const mx = cameraMode === 'firstperson' ? canvas.width / 2 : mouseState.x * (canvas.width / canvas.clientWidth);
                  const my = cameraMode === 'firstperson' ? canvas.height / 2 : mouseState.y * (canvas.height / canvas.clientHeight);
@@ -2832,53 +2742,6 @@
                  passTarget.dispatchWorkgroups(1);  // 只需要1个工作组 | Only need 1 workgroup
                  passTarget.end();
 
-                 // 🧍 第1.5步: 玩家体素管理通道(仅第一人称模式) | Step 1.5: Player voxel management pass (first-person mode only)
-                 if (cameraMode === 'firstperson') {
-                     // 管理玩家体素: 创建或维护玩家体素 | Manage player voxel: create or maintain player voxel
-                     const passManagePlayer = commandEncoder.beginComputePass();
-                     passManagePlayer.setPipeline(managePlayerPipeline);
-                     passManagePlayer.setBindGroup(0, managePlayerBindGroup);
-                     passManagePlayer.dispatchWorkgroups(1);  // 单线程管理 | Single thread management
-                     passManagePlayer.end();
-                 }
-
-                 // ⚡ 第2步: 物理模拟通道(可能多次) | Step 2: Physics simulation pass (possibly multiple times)
-                 // 🎨 可调参数: uiControls.simSteps控制每帧模拟步数 | Adjustable: simSteps controls simulation steps per frame
-                 if (uiControls.simSteps > 0) {
-                     for (let i = 0; i < uiControls.simSteps; i++) {
-                         // 重置"已更新"标志 | Reset "updated" flags
-                         const passReset = commandEncoder.beginComputePass();
-                         passReset.setPipeline(resetFlagsPipeline); 
-                         passReset.setBindGroup(0, resetFlagsBindGroup);
-                         // dispatchWorkgroups启动GPU计算 | dispatchWorkgroups launches GPU compute
-                         // 参数是工作组数量，不是线程数 | Parameters are workgroup counts, not thread counts
-                         passReset.dispatchWorkgroups(VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 4); 
-                         passReset.end();
-
-                         // 执行物理模拟 | Execute physics simulation
-                         const passSim = commandEncoder.beginComputePass();
-                         passSim.setPipeline(simulationPipeline); 
-                         passSim.setBindGroup(0, simulationBindGroup);
-                         passSim.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4); 
-                         passSim.end();
-                     }
-                 }
-
-                 // 🔍 第2.5步: 寻找玩家体素位置(仅第一人称模式) | Step 2.5: Find player voxel position (first-person mode only)
-                 if (cameraMode === 'firstperson') {
-                     // 扫描所有体素寻找玩家 | Scan all voxels to find player
-                     const passFindPlayer = commandEncoder.beginComputePass();
-                     passFindPlayer.setPipeline(findPlayerPipeline);
-                     passFindPlayer.setBindGroup(0, findPlayerBindGroup);
-                     passFindPlayer.dispatchWorkgroups(VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4);
-                     passFindPlayer.end();
-                     
-                     // Copy player position to CPU-readable buffer ONLY if no map operation is pending
-                     // This prevents "Buffer used in submit while mapped" WebGPU errors
-                     if (!playerPosMapPending) {
-                         commandEncoder.copyBufferToBuffer(playerPosBuffer, 0, playerPosReadBuffer, 0, 16);
-                     }
-                 }
 
                  // 🖌️ 第3步: 绘制工具应用 | Step 3: Paint tool application
                  if (paintingGPU) {
@@ -2915,39 +2778,6 @@
                  // 🚀 提交所有命令到GPU执行 | Submit all commands to GPU for execution
                  device.queue.submit([commandEncoder.finish()]);
                  
-                 // 🎮 读回玩家体素位置（仅第一人称模式）| Read back player voxel position (first-person mode only)
-                 if (cameraMode === 'firstperson' && !playerPosMapPending) {
-                     // 设置映射标志，防止重复映射 | Set mapping flag to prevent duplicate mapping
-                     playerPosMapPending = true;
-                     
-                     // 异步读取玩家位置 | Asynchronously read player position
-                     playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
-                         const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
-                         
-                         // 读取玩家位置和found标志 | Read player position and found flag
-                         const x = data[0];
-                         const y = data[1];
-                         const z = data[2];
-                         const found = data[3];
-                         
-                         // 更新玩家体素位置 | Update player voxel position
-                         if (found === 1) {
-                             playerVoxelPosition[0] = x;
-                             playerVoxelPosition[1] = y;
-                             playerVoxelPosition[2] = z;
-                             playerVoxelFound = true;
-                         } else {
-                             playerVoxelFound = false;
-                         }
-                         
-                         // 取消映射 | Unmap buffer
-                         playerPosReadBuffer.unmap();
-                         playerPosMapPending = false;
-                     }).catch(error => {
-                         console.warn("Failed to read player position:", error);
-                         playerPosMapPending = false;
-                     });
-                 }
 
                  // 📊 更新FPS显示 | Update FPS display
                  document.getElementById('fps').textContent = (1000 / (now - lastFrameTime)).toFixed(1);
