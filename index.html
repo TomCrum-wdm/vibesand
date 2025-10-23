@@ -2087,6 +2087,10 @@
                  size: 16,  // vec4<u32> = 16 bytes (x, y, z, found_flag)
                  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
              });
+             // 初始化玩家位置缓冲区为0 | Initialize player position buffer to zeros
+             // 这很重要：found_flag (position 3) 必须初始化为0，否则shader会读取垃圾数据
+             // This is critical: found_flag (position 3) must be initialized to 0, otherwise shader reads garbage data
+             device.queue.writeBuffer(playerPosBuffer, 0, new Uint32Array([0, 0, 0, 0]));
              
              // 玩家位置读取缓冲区 | Player position readback buffer  
              // 用于从GPU读回玩家位置到CPU | Used to read back player position from GPU to CPU
