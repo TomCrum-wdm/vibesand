@@ -2494,46 +2494,17 @@
              }
              resizeCanvasAndContext();
 
-            // 🎮 Update first-person camera - simplified without CPU collision
-            // 更新第一人称相机 - 简化版，无CPU碰撞检测 | Update first-person camera - simplified without CPU collision
-            // 玩家碰撞由GPU物理系统通过玩家体素处理 | Player collision handled by GPU physics via player voxel
+            // 🎮 Update first-person camera - camera bound to player voxel
+            // 更新第一人称相机 - 相机绑定到玩家体素 | Update first-person camera - camera bound to player voxel
+            // 玩家体素由GPU物理系统管理 | Player voxel managed by GPU physics system
+            // 相机位置从玩家体素位置读取 | Camera position read from player voxel position
             function updateFirstPersonCamera(deltaTime) {
                 if (cameraMode !== 'firstperson') return;
                 
-                const camera = firstPersonCamera;
-                
-                // 🚶 Calculate movement direction
-                // 计算移动方向 | Calculate movement direction
-                const forwardH = [Math.cos(camera.yaw), 0, Math.sin(camera.yaw)];
-                const right = [-Math.sin(camera.yaw), 0, Math.cos(camera.yaw)];
-                
-                let moveX = 0, moveY = 0, moveZ = 0;
-                if (keyState.w) { moveX += forwardH[0]; moveZ += forwardH[2]; }
-                if (keyState.s) { moveX -= forwardH[0]; moveZ -= forwardH[2]; }
-                if (keyState.a) { moveX -= right[0]; moveZ -= right[2]; }
-                if (keyState.d) { moveX += right[0]; moveZ += right[2]; }
-                if (keyState.space) { moveY += 1; }  // Move up
-                
-                // Normalize movement (归一化移动)
-                const moveLen = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
-                if (moveLen > 0) {
-                   moveX /= moveLen;
-                   moveY /= moveLen;
-                   moveZ /= moveLen;
-                }
-                
-                // Apply movement without collision detection
-                // 应用移动(无碰撞检测) | Apply movement (no collision detection)
-                const speed = camera.speed;
-                camera.position[0] += moveX * speed * deltaTime;
-                camera.position[1] += moveY * speed * deltaTime;
-                camera.position[2] += moveZ * speed * deltaTime;
-                
-                // Keep within world bounds (保持在世界边界内)
-                camera.position[0] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[0]));
-                camera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[1]));
-                camera.position[2] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 2, camera.position[2]));
-             }
+                // Camera movement is now handled by reading player voxel position from GPU
+                // The camera follows where the player voxel falls/moves with physics
+                // Only yaw and pitch are updated from mouse input (handled in mousemove event)
+            }
 
              let lastFrameTime = performance.now();
              
@@ -2733,6 +2704,9 @@
                      passFindPlayer.setBindGroup(0, findPlayerBindGroup);
                      passFindPlayer.dispatchWorkgroups(VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4);
                      passFindPlayer.end();
+                     
+                     // Copy player position to CPU-readable buffer for camera binding
+                     commandEncoder.copyBufferToBuffer(playerPosBuffer, 0, playerPosReadBuffer, 0, 16);
                  }
 
                  // 🖌️ 第3步: 绘制工具应用 | Step 3: Paint tool application
@@ -2769,6 +2743,31 @@
 
                  // 🚀 提交所有命令到GPU执行 | Submit all commands to GPU for execution
                  device.queue.submit([commandEncoder.finish()]);
+                 
+                 // 🧍 第一人称模式：读取玩家位置并绑定相机 | First-person mode: Read player position and bind camera
+                 if (cameraMode === 'firstperson') {
+                     // Read player position asynchronously (will be applied next frame)
+                     playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                         const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
+                         const playerX = data[0];
+                         const playerY = data[1];
+                         const playerZ = data[2];
+                         const found = data[3];
+                         
+                         // If player voxel was found, bind camera to it
+                         if (found === 1) {
+                             // Update camera position to player voxel position + eye height offset
+                             firstPersonCamera.position[0] = playerX + 0.5; // Center of voxel
+                             firstPersonCamera.position[1] = playerY + PLAYER_EYE_HEIGHT; // Eye height above voxel
+                             firstPersonCamera.position[2] = playerZ + 0.5; // Center of voxel
+                         }
+                         
+                         playerPosReadBuffer.unmap();
+                     }).catch(err => {
+                         // Silently handle mapping errors (can happen if buffer is busy)
+                         console.warn("Player position readback skipped:", err);
+                     });
+                 }
 
                  // 📊 更新FPS显示 | Update FPS display
                  document.getElementById('fps').textContent = (1000 / (now - lastFrameTime)).toFixed(1);
