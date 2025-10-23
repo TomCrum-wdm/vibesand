@@ -1294,7 +1294,6 @@
                  const VOXEL_TYPE_STONE = 1u;    // 石头(固体) | Stone (solid)
                  const VOXEL_TYPE_SAND = 2u;     // 沙子(会下落) | Sand (falls)
                  const VOXEL_TYPE_WATER = 3u;    // 水(流动) | Water (flows)
-                 const VOXEL_TYPE_PLAYER = 4u;   // 玩家(受物理影响) | Player (affected by physics)
 
                  // 🛠️ 工具类型常量 | Tool Type Constants
                  const TOOL_TYPE_SAND = 0u;
@@ -1467,13 +1466,11 @@
                          return;
                      }
 
-                     // Don't delete player voxel if it reaches bottom, but delete other loose voxels
-                     if (global_id.y == 0u) {
-                         if (current_type != VOXEL_TYPE_PLAYER) {
-                             atomicStore(&voxels[current_idx].data, 0u);
-                         }
-                         return;
-                     }
+                    // Delete loose voxels at bottom
+                    if (global_id.y == 0u) {
+                        atomicStore(&voxels[current_idx].data, 0u);
+                        return;
+                    }
 
                      // PRIORITY 1: Direct Vertical Fall
                      let pos_below = global_id - vec3(0u, 1u, 0u);
@@ -1482,7 +1479,7 @@
                          let type_below = getVoxelType(atomicLoad(&voxels[idx_below].data));
                          if (type_below == VOXEL_TYPE_AIR) {
                              if (attempt_move(current_idx, idx_below, initial_data)) { return; }
-                         } else if ((current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) && type_below == VOXEL_TYPE_WATER) {
+                         } else if ((current_type == VOXEL_TYPE_SAND ) && type_below == VOXEL_TYPE_WATER) {
                              if (attempt_swap(current_idx, idx_below, initial_data)) { return; }
                          }
                      }
@@ -1491,7 +1488,7 @@
 
                      // PRIORITY 2: Diagonal Fall
                      if (global_id.y > 0u) {
-                         if (current_type == VOXEL_TYPE_SAND || current_type == VOXEL_TYPE_PLAYER) {
+                         if (current_type == VOXEL_TYPE_SAND ) {
                              let DIAGONAL_SLIDES_SAND = array<vec3<i32>, 8>(
                                  vec3(1,-1,0), vec3(-1,-1,0), vec3(0,-1,1), vec3(0,-1,-1),
                                  vec3(1,-1,1), vec3(-1,-1,1), vec3(1,-1,-1), vec3(-1,-1,-1)
@@ -1657,231 +1654,6 @@
                  }
              `;
 
-            const findPlayerShaderCode = `
-                ${commonShaderCode}
-                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                @group(0) @binding(1) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>; // xyz position + found flag
-                
-                @compute @workgroup_size(4, 4, 4)
-                fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-                    let idx = pos_to_idx(id);
-                    if (idx != 0xFFFFFFFFu) {
-                        let v_type = getVoxelType(atomicLoad(&voxels[idx].data));
-                        if (v_type == VOXEL_TYPE_PLAYER) {
-                            // Found the player voxel, write its position atomically
-                            // Only first thread to find player will write (race is acceptable)
-                            atomicStore(&player_pos_output[0], id.x);
-                            atomicStore(&player_pos_output[1], id.y);
-                            atomicStore(&player_pos_output[2], id.z);
-                            atomicStore(&player_pos_output[3], 1u);
-                        }
-                    }
-                }
-            `;
-
-            const managePlayerShaderCode = `
-                ${commonShaderCode}
-                @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
-                @group(0) @binding(2) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>;
-                
-                // Check if there's a 1-block obstacle ahead of player that requires auto-jump
-                fn shouldAutoJump(player_pos: vec3<u32>, horizontal_move: vec2<f32>) -> bool {
-                    // Only check for auto-jump if there's horizontal movement
-                    let move_magnitude = length(horizontal_move);
-                    if (move_magnitude < 0.01) {
-                        return false;
-                    }
-                    
-                    // Normalize horizontal direction to get the forward direction
-                    let forward_dir = normalize(horizontal_move);
-                    
-                    // Check 1 block ahead in the movement direction
-                    let check_offset = vec3<i32>(
-                        i32(round(forward_dir.x)),
-                        0,
-                        i32(round(forward_dir.y))
-                    );
-                    
-                    let ahead_pos = vec3<i32>(player_pos) + check_offset;
-                    let above_ahead_pos = ahead_pos + vec3<i32>(0, 1, 0);
-                    let below_pos = vec3<i32>(player_pos) - vec3<i32>(0, 1, 0);
-                    
-                    // Check if positions are within bounds
-                    if (any(ahead_pos < vec3<i32>(0)) || any(ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
-                        any(above_ahead_pos < vec3<i32>(0)) || any(above_ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
-                        any(below_pos < vec3<i32>(0))) {
-                        return false;
-                    }
-                    
-                    let ahead_idx = pos_to_idx(vec3<u32>(ahead_pos));
-                    let above_ahead_idx = pos_to_idx(vec3<u32>(above_ahead_pos));
-                    let below_idx = pos_to_idx(vec3<u32>(below_pos));
-                    
-                    if (ahead_idx == 0xFFFFFFFFu || above_ahead_idx == 0xFFFFFFFFu || below_idx == 0xFFFFFFFFu) {
-                        return false;
-                    }
-                    
-                    // Get voxel types
-                    let ahead_type = getVoxelType(atomicLoad(&voxels[ahead_idx].data));
-                    let above_ahead_type = getVoxelType(atomicLoad(&voxels[above_ahead_idx].data));
-                    let below_type = getVoxelType(atomicLoad(&voxels[below_idx].data));
-                    
-                    // Auto-jump conditions:
-                    // 1. There's solid ground below player (standing on something)
-                    // 2. There's a solid block ahead (obstacle)
-                    // 3. There's air above the obstacle (can jump over it)
-                    let has_ground = (below_type == VOXEL_TYPE_STONE || below_type == VOXEL_TYPE_SAND);
-                    let has_obstacle = (ahead_type == VOXEL_TYPE_STONE || ahead_type == VOXEL_TYPE_SAND);
-                    let has_space_above = (above_ahead_type == VOXEL_TYPE_AIR || above_ahead_type == VOXEL_TYPE_WATER);
-                    
-                    return has_ground && has_obstacle && has_space_above;
-                }
-                
-                @compute @workgroup_size(1, 1, 1)
-                fn main() {
-                    // Get desired movement from uniforms (stored in camera_target_pos for convenience)
-                    var move_intent = tool_info.camera_target_pos;
-                    let camera_pos = tool_info.camera_position;
-                    
-                    // Check if player voxel already exists at last known position
-                    let last_found = atomicLoad(&player_pos_output[3]);
-                    if (last_found == 1u) {
-                        let last_pos = vec3<u32>(
-                            atomicLoad(&player_pos_output[0]),
-                            atomicLoad(&player_pos_output[1]),
-                            atomicLoad(&player_pos_output[2])
-                        );
-                        let last_idx = pos_to_idx(last_pos);
-                        if (last_idx != 0xFFFFFFFFu) {
-                            let voxel_data = atomicLoad(&voxels[last_idx].data);
-                            if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
-                                // Check for auto-jump (only if not already jumping upward)
-                                if (move_intent.y <= 0.0) {
-                                    let horizontal_move = vec2<f32>(move_intent.x, move_intent.z);
-                                    if (shouldAutoJump(last_pos, horizontal_move)) {
-                                        // Auto-jump! Add upward movement
-                                        move_intent.y = 0.15;  // Auto-jump velocity (slightly less than manual jump)
-                                    }
-                                }
-                                
-                                // Player voxel exists! Apply movement intent
-                                // Calculate target position based on current position + movement
-                                let current_pos_f = vec3<f32>(last_pos) + vec3<f32>(0.5); // Center of voxel
-                                let new_pos_f = current_pos_f + move_intent;
-                                let new_pos = vec3<u32>(
-                                    clamp(u32(floor(new_pos_f.x)), 0u, GRID_DIM - 1u),
-                                    clamp(u32(floor(new_pos_f.y)), 0u, GRID_DIM - 1u),
-                                    clamp(u32(floor(new_pos_f.z)), 0u, GRID_DIM - 1u)
-                                );
-                                
-                                // Only move if target position is different and is air or water
-                                if (any(new_pos != last_pos)) {
-                                    let new_idx = pos_to_idx(new_pos);
-                                    if (new_idx != 0xFFFFFFFFu) {
-                                        let target_voxel_data = atomicLoad(&voxels[new_idx].data);
-                                        let target_type = getVoxelType(target_voxel_data);
-                                        
-                                        // Allow movement into air or water (swap with water)
-                                        if (target_type == VOXEL_TYPE_AIR || target_type == VOXEL_TYPE_WATER) {
-                                            // Get player voxel data (to preserve lighting)
-                                            let player_voxel = unpackVoxel(voxel_data);
-                                            
-                                            // Atomic swap: move player to new position, place target in old position
-                                            atomicStore(&voxels[new_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, player_voxel.light));
-                                            atomicStore(&voxels[last_idx].data, target_voxel_data);
-                                            
-                                            // Update position tracking - keep found flag set to 1 since player still exists
-                                            atomicStore(&player_pos_output[0], new_pos.x);
-                                            atomicStore(&player_pos_output[1], new_pos.y);
-                                            atomicStore(&player_pos_output[2], new_pos.z);
-                                            // Keep found_flag = 1 so next frame can find player immediately
-                                            return;
-                                        }
-                                    }
-                                }
-                                
-                                // Couldn't move (blocked by solid), but player still exists at last_pos
-                                // Keep found flag set so we can try again next frame
-                                return;
-                            }
-                        }
-                    }
-                    
-                    // Player voxel doesn't exist (fell off or was destroyed), create new one at camera position
-                    let spawn_pos = vec3<u32>(
-                        clamp(u32(floor(camera_pos.x)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.y)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.z)), 0u, GRID_DIM - 1u)
-                    );
-                    let spawn_idx = pos_to_idx(spawn_pos);
-                    if (spawn_idx != 0xFFFFFFFFu) {
-                        // Always try to place player voxel, even if occupied (will replace)
-                        // This ensures player is always visible near camera
-                        atomicStore(&voxels[spawn_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
-                        
-                        // Update player position output with found flag set to 1 since we just spawned it
-                        atomicStore(&player_pos_output[0], spawn_pos.x);
-                        atomicStore(&player_pos_output[1], spawn_pos.y);
-                        atomicStore(&player_pos_output[2], spawn_pos.z);
-                        atomicStore(&player_pos_output[3], 1u);
-                    }
-                }
-            `;
-
-             const targetingShaderCode = `
-                 ${commonShaderCode}
-                 @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                 @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
-                 @group(0) @binding(2) var<storage, read_write> output: TargetingOutput;
-                 fn intersect_aabb(ro: vec3<f32>, rd: vec3<f32>, min_b: vec3<f32>, max_b: vec3<f32>) -> vec2<f32> {
-                     let inv_rd = 1.0 / rd; let t1 = (min_b - ro) * inv_rd; let t2 = (max_b - ro) * inv_rd;
-                     let t_min = max(max(min(t1.x, t2.x), min(t1.y, t2.y)), min(t1.z, t2.z));
-                     let t_max = min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z));
-                     return vec2(t_min, t_max);
-                 }
-                 @compute @workgroup_size(1, 1, 1)
-                 fn main() {
-                     output.hit = 0u;
-                     var ray_origin = tool_info.camera_position;
-                     let cam_fwd = normalize(tool_info.camera_target_pos - ray_origin);
-                     let aspect_ratio = tool_info.canvas_dims.x / tool_info.canvas_dims.y;
-                     let ray_dir = normalize(tool_info.camera_right * ((tool_info.mouse_pos.x/tool_info.canvas_dims.x)-0.5)*2.0*aspect_ratio + tool_info.camera_up * ((tool_info.mouse_pos.y/tool_info.canvas_dims.y)-0.5)*-2.0 + cam_fwd*tool_info.camera_zoom);
-                     let t_bounds = intersect_aabb(ray_origin, ray_dir, vec3(0.0), vec3(f32(GRID_DIM)));
-
-                     if (t_bounds.x >= t_bounds.y || t_bounds.y < 0.0 ) { return; }
-
-                     var dda_pos = ray_origin + ray_dir * (max(0.0, t_bounds.x) - 0.001);
-                     var map_pos = vec3<i32>(floor(dda_pos));
-                     let step = vec3<i32>(sign(ray_dir));
-                     let delta = abs(1.0 / (ray_dir + 1e-6));
-                     var side = (sign(ray_dir) * (vec3<f32>(map_pos) - dda_pos) + (sign(ray_dir) * 0.5 + 0.5)) * delta;
-                     var last_map_pos = map_pos;
-
-                     for (var i = 0u; i < tool_info.max_ray_steps_compute; i = i + 1u) {
-                         last_map_pos = map_pos;
-                         if (side.x < side.y && side.x < side.z) { side.x += delta.x; map_pos.x += step.x; }
-                         else if (side.y < side.z) { side.y += delta.y; map_pos.y += step.y; }
-                         else { side.z += delta.z; map_pos.z += step.z; }
-
-                         let idx = pos_to_idx(vec3<u32>(map_pos));
-                         if (idx != 0xFFFFFFFFu && getVoxelType(atomicLoad(&voxels[idx].data)) != VOXEL_TYPE_AIR) {
-                             var hit_pos_f = select(vec3<f32>(last_map_pos), vec3<f32>(map_pos), tool_info.tool_type == TOOL_TYPE_DESTROY);
-                             output.aim_pos = vec4(hit_pos_f + 0.5, 0.0);
-                             output.hit = 1u;
-                             return;
-                         }
-                         if (any(map_pos < vec3<i32>(0)) || any(map_pos >= vec3<i32>(i32(GRID_DIM)))) { break; }
-                     }
-
-                     let dist_to_bbox_hit: f32 = select(max(0.0, t_bounds.x), t_bounds.y, tool_info.target_far_face_on_air_hit == 1u);
-                     let hit_pos_on_bbox = ray_origin + ray_dir * dist_to_bbox_hit;
-                     let target_point_for_placement: vec3<f32> = select(hit_pos_on_bbox + ray_dir * 0.501, hit_pos_on_bbox - ray_dir * 0.501, tool_info.target_far_face_on_air_hit == 1u);
-                     output.aim_pos = vec4(clamp(target_point_for_placement, vec3(0.0), vec3(f32(GRID_DIM) - 1.0)), 0.0);
-                     output.hit = 1u;
-                 }
-             `;
-
              const renderShaderCode = `
                  ${commonShaderCode}
                  @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
@@ -1896,9 +1668,6 @@
                      }
                      if (voxel.v_type == VOXEL_TYPE_SAND) {
                          return vec3(0.8, 0.7, 0.4) + (variant_f - 0.5) * 0.1;
-                     }
-                     if (voxel.v_type == VOXEL_TYPE_PLAYER) {
-                         return vec3(0.2, 0.8, 0.2); // Bright green for player visibility
                      }
                      if (is_water) {
                          return vec3(0.15, 0.45, 0.85); // Flat base color for water, variant removed
@@ -2165,34 +1934,6 @@
              
              // 🧍 玩家位置输出缓冲区 | Player position output buffer
              // 存储GPU找到的玩家体素位置 | Stores player voxel position found by GPU
-             const playerPosBuffer = device.createBuffer({
-                 size: 16,  // vec4<u32> = 16 bytes (x, y, z, found_flag)
-                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
-             });
-             // 初始化玩家位置缓冲区为0 | Initialize player position buffer to zeros
-             // 这很重要：found_flag (position 3) 必须初始化为0，否则shader会读取垃圾数据
-             // This is critical: found_flag (position 3) must be initialized to 0, otherwise shader reads garbage data
-             device.queue.writeBuffer(playerPosBuffer, 0, new Uint32Array([0, 0, 0, 0]));
-             
-             // 玩家位置读取缓冲区 | Player position readback buffer  
-             // 用于从GPU读回玩家位置到CPU | Used to read back player position from GPU to CPU
-             const playerPosReadBuffer = device.createBuffer({
-                 size: 16,
-                 usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-             });
-             
-             // Flag to track if a map operation is pending on playerPosReadBuffer
-             // 标志位：追踪玩家位置缓冲区是否有待处理的映射操作
-             let playerPosMapPending = false;
-             
-             // 🎮 玩家体素位置跟踪 | Player voxel position tracking
-             // 从GPU读回的实际玩家位置 | Actual player position read back from GPU
-             let playerVoxelPosition = [64, 35, 64];  // 初始位置 | Initial position
-             let playerVoxelFound = false;  // 是否找到玩家体素 | Whether player voxel was found
-             
-             // 🎮 玩家移动意图 | Player movement intent
-             // 存储玩家想要移动的方向（由WASD控制）| Store the direction player wants to move (controlled by WASD)
-             let playerMoveIntent = [0, 0, 0];  // x, y, z movement intent
              
              // 💡 光源统一缓冲区 | Lights uniform buffer
              // 存储所有动态点光源的数据 | Stores data for all dynamic point lights
@@ -2277,25 +2018,6 @@
                  }
              });
              
-             // 🔍 寻找玩家管线 | Find player pipeline
-             // 用途: GPU扫描找到玩家体素位置 | Purpose: GPU scan to find player voxel position
-             const findPlayerPipeline = device.createComputePipeline({
-                 layout: 'auto',
-                 compute: {
-                     module: device.createShaderModule({ code: findPlayerShaderCode }),
-                     entryPoint: 'main'
-                 }
-             });
-             
-             // 🧍 管理玩家管线 | Manage player pipeline
-             // 用途: 创建/维护玩家体素 | Purpose: Create/maintain player voxel
-             const managePlayerPipeline = device.createComputePipeline({
-                 layout: 'auto',
-                 compute: {
-                     module: device.createShaderModule({ code: managePlayerShaderCode }),
-                     entryPoint: 'main'
-                 }
-             });
              
              // 🎨 渲染管线 | Render pipeline
              // 用途: 将3D体素世界渲染到2D屏幕 | Purpose: Render 3D voxel world to 2D screen
@@ -2396,26 +2118,6 @@
                  ]
              });
              
-             // 🔍 寻找玩家绑定组 | Find player bind group
-             // 绑定: 体素缓冲区(只读) + 玩家位置输出(写入) | Binds: voxel buffer + player position output
-             const findPlayerBindGroup = device.createBindGroup({
-                 layout: findPlayerPipeline.getBindGroupLayout(0),
-                 entries: [
-                     { binding: 0, resource: { buffer: voxelBuffer } },
-                     { binding: 1, resource: { buffer: playerPosBuffer } }
-                 ]
-             });
-             
-             // 🧍 管理玩家绑定组 | Manage player bind group
-             // 绑定: 体素缓冲区(读写) + 计算参数(只读) + 玩家位置输出(读写) | Binds: voxel buffer + compute params + player position
-             const managePlayerBindGroup = device.createBindGroup({
-                 layout: managePlayerPipeline.getBindGroupLayout(0),
-                 entries: [
-                     { binding: 0, resource: { buffer: voxelBuffer } },
-                     { binding: 1, resource: { buffer: computePassUniformsBuffer } },
-                     { binding: 2, resource: { buffer: playerPosBuffer } }
-                 ]
-             });
              
              // 🎨 渲染绑定组 | Render bind group
              // 绑定: 体素缓冲区(只读) + 渲染参数(只读) + 工具参数(只读) + 目标位置(只读)
@@ -3009,12 +2711,7 @@
                  computeUBO.set([2.0], 3); 
                  computeUBO.set(currentRight, 4); 
                  computeUBO.set(currentUp, 8);
-                 // 在第一人称模式下，传递玩家移动意图；否则传递相机目标 | In first-person mode, pass player movement intent; otherwise pass camera target
-                 if (cameraMode === 'firstperson') {
-                     computeUBO.set(playerMoveIntent, 12);  // 玩家移动意图 | Player movement intent
-                 } else {
-                     computeUBO.set(cameraTarget, 12);
-                 }
+                computeUBO.set(cameraTarget, 12);
                  // 在第一人称模式下，始终瞄准屏幕中心 | In first-person mode, always aim at screen center
                  const mx = cameraMode === 'firstperson' ? canvas.width / 2 : mouseState.x * (canvas.width / canvas.clientWidth);
                  const my = cameraMode === 'firstperson' ? canvas.height / 2 : mouseState.y * (canvas.height / canvas.clientHeight);
@@ -3045,53 +2742,6 @@
                  passTarget.dispatchWorkgroups(1);  // 只需要1个工作组 | Only need 1 workgroup
                  passTarget.end();
 
-                 // 🧍 第1.5步: 玩家体素管理通道(仅第一人称模式) | Step 1.5: Player voxel management pass (first-person mode only)
-                 if (cameraMode === 'firstperson') {
-                     // 管理玩家体素: 创建或维护玩家体素 | Manage player voxel: create or maintain player voxel
-                     const passManagePlayer = commandEncoder.beginComputePass();
-                     passManagePlayer.setPipeline(managePlayerPipeline);
-                     passManagePlayer.setBindGroup(0, managePlayerBindGroup);
-                     passManagePlayer.dispatchWorkgroups(1);  // 单线程管理 | Single thread management
-                     passManagePlayer.end();
-                 }
-
-                 // ⚡ 第2步: 物理模拟通道(可能多次) | Step 2: Physics simulation pass (possibly multiple times)
-                 // 🎨 可调参数: uiControls.simSteps控制每帧模拟步数 | Adjustable: simSteps controls simulation steps per frame
-                 if (uiControls.simSteps > 0) {
-                     for (let i = 0; i < uiControls.simSteps; i++) {
-                         // 重置"已更新"标志 | Reset "updated" flags
-                         const passReset = commandEncoder.beginComputePass();
-                         passReset.setPipeline(resetFlagsPipeline); 
-                         passReset.setBindGroup(0, resetFlagsBindGroup);
-                         // dispatchWorkgroups启动GPU计算 | dispatchWorkgroups launches GPU compute
-                         // 参数是工作组数量，不是线程数 | Parameters are workgroup counts, not thread counts
-                         passReset.dispatchWorkgroups(VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 8, VOXEL_GRID_SIZE / 4); 
-                         passReset.end();
-
-                         // 执行物理模拟 | Execute physics simulation
-                         const passSim = commandEncoder.beginComputePass();
-                         passSim.setPipeline(simulationPipeline); 
-                         passSim.setBindGroup(0, simulationBindGroup);
-                         passSim.dispatchWorkgroups(VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4, VOXEL_GRID_SIZE/4); 
-                         passSim.end();
-                     }
-                 }
-
-                 // 🔍 第2.5步: 寻找玩家体素位置(仅第一人称模式) | Step 2.5: Find player voxel position (first-person mode only)
-                 if (cameraMode === 'firstperson') {
-                     // 扫描所有体素寻找玩家 | Scan all voxels to find player
-                     const passFindPlayer = commandEncoder.beginComputePass();
-                     passFindPlayer.setPipeline(findPlayerPipeline);
-                     passFindPlayer.setBindGroup(0, findPlayerBindGroup);
-                     passFindPlayer.dispatchWorkgroups(VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4, VOXEL_GRID_SIZE / 4);
-                     passFindPlayer.end();
-                     
-                     // Copy player position to CPU-readable buffer ONLY if no map operation is pending
-                     // This prevents "Buffer used in submit while mapped" WebGPU errors
-                     if (!playerPosMapPending) {
-                         commandEncoder.copyBufferToBuffer(playerPosBuffer, 0, playerPosReadBuffer, 0, 16);
-                     }
-                 }
 
                  // 🖌️ 第3步: 绘制工具应用 | Step 3: Paint tool application
                  if (paintingGPU) {
@@ -3128,39 +2778,6 @@
                  // 🚀 提交所有命令到GPU执行 | Submit all commands to GPU for execution
                  device.queue.submit([commandEncoder.finish()]);
                  
-                 // 🎮 读回玩家体素位置（仅第一人称模式）| Read back player voxel position (first-person mode only)
-                 if (cameraMode === 'firstperson' && !playerPosMapPending) {
-                     // 设置映射标志，防止重复映射 | Set mapping flag to prevent duplicate mapping
-                     playerPosMapPending = true;
-                     
-                     // 异步读取玩家位置 | Asynchronously read player position
-                     playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
-                         const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
-                         
-                         // 读取玩家位置和found标志 | Read player position and found flag
-                         const x = data[0];
-                         const y = data[1];
-                         const z = data[2];
-                         const found = data[3];
-                         
-                         // 更新玩家体素位置 | Update player voxel position
-                         if (found === 1) {
-                             playerVoxelPosition[0] = x;
-                             playerVoxelPosition[1] = y;
-                             playerVoxelPosition[2] = z;
-                             playerVoxelFound = true;
-                         } else {
-                             playerVoxelFound = false;
-                         }
-                         
-                         // 取消映射 | Unmap buffer
-                         playerPosReadBuffer.unmap();
-                         playerPosMapPending = false;
-                     }).catch(error => {
-                         console.warn("Failed to read player position:", error);
-                         playerPosMapPending = false;
-                     });
-                 }
 
                  // 📊 更新FPS显示 | Update FPS display
                  document.getElementById('fps').textContent = (1000 / (now - lastFrameTime)).toFixed(1);
