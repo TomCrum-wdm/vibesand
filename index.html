@@ -1052,10 +1052,6 @@
              // 更大的值 = 平移更快 | Larger value = faster panning
              const PAN_SENSITIVITY = 0.1;
              
-             // 🧍 第一人称玩家物理参数 | First-Person Player Physics Parameters
-             const PLAYER_HEIGHT = 1.8;      // 玩家高度(体素单位) | Player height in voxel units
-             const PLAYER_RADIUS = 0.4;      // 玩家碰撞半径 | Player collision radius
-             const PLAYER_EYE_HEIGHT = 1.6;  // 眼睛高度 | Eye height from feet
 
              // 🛠️ 工具类型常量 | Tool Type Constants
              // 这些常量定义了不同的绘制工具 | These constants define different painting tools
@@ -1175,17 +1171,41 @@
              let currentCamX=0, currentCamY=0, currentCamZ=0;
              let currentForward=[0,0,1], currentRight=[1,0,0], currentUp=[0,1,0];
              let cameraMode = 'orbital'; // 'orbital' or 'firstperson'
-             let firstPersonCamera = {
-                position: [VOXEL_GRID_SIZE / 2, VOXEL_GRID_SIZE - 10, VOXEL_GRID_SIZE / 2], // Spawn high above terrain
-                yaw: -Math.PI / 2, // Looking towards +X initially
-                pitch: 0,
+            
+            // ==================================================
+            // 🎮 NEW CPU-Based Player Controller | 新的CPU玩家控制器
+            // ==================================================
+            // Smooth, responsive Minecraft-like movement with continuous collision
+            // 流畅、响应灵敏的类Minecraft移动，带连续碰撞检测
+            let player = {
+                // 连续位置 (浮点数，非体素对齐) | Continuous position (float, not voxel-aligned)
+                position: [VOXEL_GRID_SIZE / 2, VOXEL_GRID_SIZE - 10, VOXEL_GRID_SIZE / 2],
+                // 速度向量 | Velocity vector
                 velocity: [0, 0, 0],
-                speed: 20.0,
-                jumpVelocity: 18.0,  // Increased from 8.0 to overcome gravity better and enable jumping
-                gravity: -20.0,
+                // 视角方向 | View direction
+                yaw: -Math.PI / 2,
+                pitch: 0,
+                // 物理状态 | Physics state
                 isGrounded: false,
-                height: 1.8,
-             };
+                // 碰撞盒尺寸 | Collision box dimensions
+                width: 0.6,    // X and Z axis width (player width)
+                height: 1.8,   // Y axis height
+                eyeHeight: 1.62, // Eye position from feet (slightly below full height)
+                // 移动参数 | Movement parameters
+                walkSpeed: 4.317,      // blocks per second (Minecraft walking speed)
+                sprintSpeed: 5.612,    // blocks per second (not implemented yet)
+                jumpVelocity: 8.0,     // blocks per second upward
+                gravity: 32.0,         // blocks per second² downward
+                // 地面移动 | Ground movement
+                groundAcceleration: 100.0,  // How fast to reach target speed
+                groundFriction: 20.0,       // How fast to stop
+                // 空中移动 | Air movement  
+                airAcceleration: 20.0,      // Air control (less than ground)
+                airFriction: 2.0,           // Minimal air drag
+                // 阶梯自动攀爬 | Step climbing
+                stepHeight: 0.6,       // Can step up this high automatically
+            };
+            
              let keyState = {
                 w: false, a: false, s: false, d: false, space: false, shift: false,
              };
@@ -2410,6 +2430,229 @@
                  ]
              });
 
+            // ==================================================
+            // 🎯 CPU-Based Player Physics and Collision | CPU玩家物理和碰撞
+            // ==================================================
+            
+            // Helper to read voxel from GPU buffer (CPU side, async - only for debugging)
+            // We'll use a synchronous approach by maintaining a CPU shadow copy during generation
+            let voxelShadow = null; // Will store voxel data for CPU collision checks
+            
+            /**
+             * Check if a voxel position is solid (blocks movement)
+             * @param {number} x - Voxel X coordinate
+             * @param {number} y - Voxel Y coordinate
+             * @param {number} z - Voxel Z coordinate
+             * @returns {boolean} - True if solid
+             */
+            function isVoxelSolid(x, y, z) {
+                // Clamp to grid bounds
+                if (x < 0 || x >= VOXEL_GRID_SIZE || y < 0 || y >= VOXEL_GRID_SIZE || z < 0 || z >= VOXEL_GRID_SIZE) {
+                    return true; // Out of bounds is solid
+                }
+                
+                const vx = Math.floor(x);
+                const vy = Math.floor(y);
+                const vz = Math.floor(z);
+                
+                // Calculate voxel index
+                const idx = vx + vy * VOXEL_GRID_SIZE + vz * VOXEL_GRID_SIZE * VOXEL_GRID_SIZE;
+                
+                // Read from shadow buffer if available
+                if (voxelShadow && idx < voxelShadow.length) {
+                    const voxelData = voxelShadow[idx];
+                    const voxelType = voxelData & 0x7; // Extract type from bits 0-2
+                    // Types: 0=AIR, 1=STONE, 2=SAND, 3=WATER, 4=PLAYER
+                    // Solid types: STONE (1), SAND (2)
+                    return voxelType === 1 || voxelType === 2;
+                }
+                
+                // Default to not solid if no shadow buffer (shouldn't happen)
+                return false;
+            }
+            
+            /**
+             * Check if AABB collides with any solid voxels
+             * @param {number} minX - Min X of bounding box
+             * @param {number} minY - Min Y of bounding box
+             * @param {number} minZ - Min Z of bounding box
+             * @param {number} maxX - Max X of bounding box
+             * @param {number} maxY - Max Y of bounding box
+             * @param {number} maxZ - Max Z of bounding box
+             * @returns {boolean} - True if collision detected
+             */
+            function checkAABBCollision(minX, minY, minZ, maxX, maxY, maxZ) {
+                // Check all voxels that the AABB overlaps
+                const startX = Math.floor(minX);
+                const startY = Math.floor(minY);
+                const startZ = Math.floor(minZ);
+                const endX = Math.floor(maxX);
+                const endY = Math.floor(maxY);
+                const endZ = Math.floor(maxZ);
+                
+                for (let x = startX; x <= endX; x++) {
+                    for (let y = startY; y <= endY; y++) {
+                        for (let z = startZ; z <= endZ; z++) {
+                            if (isVoxelSolid(x, y, z)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                return false;
+            }
+            
+            /**
+             * Update player physics and movement (Minecraft-style)
+             * @param {number} deltaTime - Time since last frame in seconds
+             */
+            function updatePlayerPhysics(deltaTime) {
+                if (cameraMode !== 'firstperson') return;
+                
+                // Clamp deltaTime to prevent huge jumps (max 0.1s = 10 FPS minimum)
+                deltaTime = Math.min(deltaTime, 0.1);
+                
+                // ==== Input Processing ====
+                // Calculate desired movement direction from WASD keys
+                let moveX = 0, moveZ = 0;
+                if (keyState.w) { moveX += Math.cos(player.yaw); moveZ += Math.sin(player.yaw); }
+                if (keyState.s) { moveX -= Math.cos(player.yaw); moveZ -= Math.sin(player.yaw); }
+                if (keyState.a) { moveX -= Math.sin(player.yaw); moveZ += Math.cos(player.yaw); }
+                if (keyState.d) { moveX += Math.sin(player.yaw); moveZ -= Math.cos(player.yaw); }
+                
+                // Normalize input to prevent faster diagonal movement
+                const inputMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+                if (inputMagnitude > 0) {
+                    moveX /= inputMagnitude;
+                    moveZ /= inputMagnitude;
+                }
+                
+                // ==== Ground Detection ====
+                // Check if player is on ground by testing slightly below feet
+                const feetY = player.position[1];
+                const halfWidth = player.width / 2;
+                player.isGrounded = checkAABBCollision(
+                    player.position[0] - halfWidth,
+                    feetY - 0.1,
+                    player.position[2] - halfWidth,
+                    player.position[0] + halfWidth,
+                    feetY,
+                    player.position[2] + halfWidth
+                );
+                
+                // ==== Horizontal Movement ====
+                const targetSpeed = player.walkSpeed;
+                const targetVelX = moveX * targetSpeed;
+                const targetVelZ = moveZ * targetSpeed;
+                
+                if (player.isGrounded) {
+                    // Ground movement: fast acceleration and friction
+                    const accel = player.groundAcceleration * deltaTime;
+                    const friction = player.groundFriction * deltaTime;
+                    
+                    // Accelerate towards target velocity
+                    player.velocity[0] += (targetVelX - player.velocity[0]) * Math.min(accel, 1.0);
+                    player.velocity[2] += (targetVelZ - player.velocity[2]) * Math.min(accel, 1.0);
+                    
+                    // Apply friction when not pressing any movement keys
+                    if (inputMagnitude === 0) {
+                        player.velocity[0] *= Math.max(0, 1 - friction);
+                        player.velocity[2] *= Math.max(0, 1 - friction);
+                    }
+                } else {
+                    // Air movement: limited control
+                    const airAccel = player.airAcceleration * deltaTime;
+                    player.velocity[0] += (targetVelX - player.velocity[0]) * Math.min(airAccel, 1.0);
+                    player.velocity[2] += (targetVelZ - player.velocity[2]) * Math.min(airAccel, 1.0);
+                }
+                
+                // ==== Jumping ====
+                if (keyState.space && player.isGrounded) {
+                    player.velocity[1] = player.jumpVelocity;
+                    player.isGrounded = false; // Prevent double jumping
+                }
+                
+                // ==== Gravity ====
+                if (!player.isGrounded) {
+                    player.velocity[1] -= player.gravity * deltaTime;
+                    // Terminal velocity (prevent infinite falling speed)
+                    player.velocity[1] = Math.max(player.velocity[1], -78.4); // Minecraft terminal velocity
+                }
+                
+                // ==== Collision Detection and Position Update ====
+                const newHalfWidth = player.width / 2;
+                
+                // Move X axis with collision
+                let newX = player.position[0] + player.velocity[0] * deltaTime;
+                if (!checkAABBCollision(
+                    newX - newHalfWidth, player.position[1], player.position[2] - newHalfWidth,
+                    newX + newHalfWidth, player.position[1] + player.height, player.position[2] + newHalfWidth
+                )) {
+                    player.position[0] = newX;
+                } else {
+                    player.velocity[0] = 0; // Stop horizontal movement on collision
+                }
+                
+                // Move Z axis with collision
+                let newZ = player.position[2] + player.velocity[2] * deltaTime;
+                if (!checkAABBCollision(
+                    player.position[0] - newHalfWidth, player.position[1], newZ - newHalfWidth,
+                    player.position[0] + newHalfWidth, player.position[1] + player.height, newZ + newHalfWidth
+                )) {
+                    player.position[2] = newZ;
+                } else {
+                    player.velocity[2] = 0; // Stop horizontal movement on collision
+                }
+                
+                // Move Y axis with collision
+                let newY = player.position[1] + player.velocity[1] * deltaTime;
+                if (!checkAABBCollision(
+                    player.position[0] - newHalfWidth, newY, player.position[2] - newHalfWidth,
+                    player.position[0] + newHalfWidth, newY + player.height, player.position[2] + newHalfWidth
+                )) {
+                    player.position[1] = newY;
+                } else {
+                    // Hit ceiling or floor
+                    if (player.velocity[1] < 0) {
+                        // Hit floor, snap to ground
+                        player.position[1] = Math.floor(player.position[1] + 0.001);
+                        player.isGrounded = true;
+                    }
+                    player.velocity[1] = 0;
+                }
+                
+                // ==== Step Climbing ====
+                // If blocked horizontally and on ground, try to step up
+                if ((player.velocity[0] !== 0 || player.velocity[2] !== 0) && player.isGrounded) {
+                    for (let stepUp = 0.1; stepUp <= player.stepHeight; stepUp += 0.1) {
+                        const testY = player.position[1] + stepUp;
+                        // Check if we can move horizontally at this height
+                        const canStepX = !checkAABBCollision(
+                            newX - newHalfWidth, testY, player.position[2] - newHalfWidth,
+                            newX + newHalfWidth, testY + player.height, player.position[2] + newHalfWidth
+                        );
+                        const canStepZ = !checkAABBCollision(
+                            player.position[0] - newHalfWidth, testY, newZ - newHalfWidth,
+                            player.position[0] + newHalfWidth, testY + player.height, newZ + newHalfWidth
+                        );
+                        if (canStepX || canStepZ) {
+                            // Step up!
+                            player.position[1] = testY;
+                            if (canStepX) player.position[0] = newX;
+                            if (canStepZ) player.position[2] = newZ;
+                            break;
+                        }
+                    }
+                }
+                
+                // ==== Boundary Clamping ====
+                // Prevent player from going out of world bounds
+                player.position[0] = Math.max(newHalfWidth, Math.min(VOXEL_GRID_SIZE - newHalfWidth, player.position[0]));
+                player.position[1] = Math.max(0, Math.min(VOXEL_GRID_SIZE - player.height, player.position[1]));
+                player.position[2] = Math.max(newHalfWidth, Math.min(VOXEL_GRID_SIZE - newHalfWidth, player.position[2]));
+            }
+
              function resizeCanvasAndContext() {
                  const newScale = parseFloat(document.getElementById('resolutionScale').value);
                  uiControls.resolutionScale = newScale;
@@ -2434,6 +2677,33 @@
                  genPass.end();
                  device.queue.submit([commandEncoder.finish()]);
                  frameCount = 0;
+                 
+                 // Create shadow copy of voxel buffer for CPU collision detection
+                 // This needs to be done async after generation completes
+                 createVoxelShadow();
+             }
+             
+             // Helper function to create CPU shadow copy of voxel buffer
+             async function createVoxelShadow() {
+                 // Create a staging buffer for reading back voxel data
+                 const stagingBuffer = device.createBuffer({
+                     size: VOXEL_BUFFER_SIZE,
+                     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+                 });
+                 
+                 // Copy voxel buffer to staging buffer
+                 const commandEncoder = device.createCommandEncoder();
+                 commandEncoder.copyBufferToBuffer(voxelBuffer, 0, stagingBuffer, 0, VOXEL_BUFFER_SIZE);
+                 device.queue.submit([commandEncoder.finish()]);
+                 
+                 // Read back the data
+                 await stagingBuffer.mapAsync(GPUMapMode.READ);
+                 const arrayBuffer = stagingBuffer.getMappedRange();
+                 voxelShadow = new Uint32Array(arrayBuffer).slice(); // Copy the data
+                 stagingBuffer.unmap();
+                 stagingBuffer.destroy();
+                 
+                 console.log('Voxel shadow buffer created for collision detection');
              }
 
              runGeneration();
@@ -2572,9 +2842,9 @@
                  if (cameraMode === 'firstperson' && document.pointerLockElement === canvas) {
                     // First-person mouse look
                     const sensitivity = 0.002;
-                    firstPersonCamera.yaw -= e.movementX * sensitivity;
-                    firstPersonCamera.pitch -= e.movementY * sensitivity;
-                    firstPersonCamera.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, firstPersonCamera.pitch));
+                    player.yaw -= e.movementX * sensitivity;
+                    player.pitch -= e.movementY * sensitivity;
+                    player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
                  } else if (cameraMode === 'orbital') {
                     const dx = e.clientX - mouseState.lastX; const dy = e.clientY - mouseState.lastY;
                     const rect = canvas.getBoundingClientRect();
@@ -2612,63 +2882,6 @@
             // 🎮 Update first-person camera and player movement
             // 更新第一人称相机和玩家移动 | Update first-person camera and player movement
             // 相机绑定到玩家体素位置，键盘控制玩家体素移动 | Camera binds to player voxel position, keyboard controls player voxel movement
-            function updateFirstPersonCamera(deltaTime) {
-                if (cameraMode !== 'firstperson') return;
-                
-                // 🎯 步骤1: 计算移动意图 | Step 1: Calculate movement intent
-                // 这会在GPU上应用到玩家体素 | This will be applied to player voxel on GPU
-                let horizontalMoveDir = [0, 0];  // X and Z movement
-                let verticalMove = 0;  // Y movement (jump)
-                
-                // WASD movement in camera's local space (horizontal only)
-                if (keyState.w) {
-                    horizontalMoveDir[0] += Math.cos(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] += Math.sin(firstPersonCamera.yaw);
-                }
-                if (keyState.s) {
-                    horizontalMoveDir[0] -= Math.cos(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] -= Math.sin(firstPersonCamera.yaw);
-                }
-                if (keyState.a) {
-                    horizontalMoveDir[0] -= Math.sin(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] += Math.cos(firstPersonCamera.yaw);
-                }
-                if (keyState.d) {
-                    horizontalMoveDir[0] += Math.sin(firstPersonCamera.yaw);
-                    horizontalMoveDir[1] -= Math.cos(firstPersonCamera.yaw);
-                }
-                
-                // Space for jump/upward movement (independent of horizontal movement)
-                // 跳跃力度独立于水平移动，不会被归一化削弱 | Jump force independent of horizontal movement, won't be weakened by normalization
-                if (keyState.space) {
-                    verticalMove = firstPersonCamera.jumpVelocity;  // 使用专用的跳跃速度 | Use dedicated jump velocity
-                }
-                
-                // Normalize horizontal movement to prevent faster diagonal movement
-                // 只归一化水平移动，保持跳跃力度不变 | Only normalize horizontal movement, keep jump force unchanged
-                const horizontalMagnitude = Math.sqrt(horizontalMoveDir[0] * horizontalMoveDir[0] + horizontalMoveDir[1] * horizontalMoveDir[1]);
-                if (horizontalMagnitude > 0) {
-                    horizontalMoveDir[0] /= horizontalMagnitude;
-                    horizontalMoveDir[1] /= horizontalMagnitude;
-                }
-                
-                // 存储移动意图（将在GPU上应用）| Store movement intent (will be applied on GPU)
-                // 水平移动使用speed，垂直移动使用jumpVelocity | Horizontal uses speed, vertical uses jumpVelocity
-                playerMoveIntent[0] = horizontalMoveDir[0] * firstPersonCamera.speed * deltaTime;
-                playerMoveIntent[1] = verticalMove * deltaTime;  // Jump is independent
-                playerMoveIntent[2] = horizontalMoveDir[1] * firstPersonCamera.speed * deltaTime;
-                
-                // 🎯 步骤2: 更新相机位置跟随玩家体素 | Step 2: Update camera position to follow player voxel
-                // 使用从GPU读回的玩家体素位置 | Use player voxel position read back from GPU
-                if (playerVoxelFound) {
-                    // 相机位置 = 玩家体素位置 + 眼睛高度偏移 | Camera position = player voxel position + eye height offset
-                    // 玩家体素在脚底，相机在眼睛高度 | Player voxel at feet, camera at eye height
-                    firstPersonCamera.position[0] = playerVoxelPosition[0] + 0.5;  // 体素中心 | Voxel center
-                    firstPersonCamera.position[1] = playerVoxelPosition[1] + PLAYER_EYE_HEIGHT;  // 眼睛高度 | Eye height
-                    firstPersonCamera.position[2] = playerVoxelPosition[2] + 0.5;  // 体素中心 | Voxel center
-                }
-            }
-
              let lastFrameTime = performance.now();
              
              // ==================================================
@@ -2682,27 +2895,27 @@
                  const deltaTime = (now - lastFrameTime) / 1000.0;  // 转换为秒 | Convert to seconds
                  
                  // 🎮 更新第一人称相机(如果在FPS模式) | Update first-person camera (if in FPS mode)
-                 updateFirstPersonCamera(deltaTime);
+                 updatePlayerPhysics(deltaTime);
                  
                  // 📷 根据相机模式计算相机位置和方向 | Calculate camera position and orientation based on mode
                  if (cameraMode === 'firstperson') {
                     // 第一人称模式: 直接使用位置和朝向 | First-person mode: use position and orientation directly
-                    currentCamX = firstPersonCamera.position[0];
-                    currentCamY = firstPersonCamera.position[1];
-                    currentCamZ = firstPersonCamera.position[2];
+                    currentCamX = player.position[0];
+                    currentCamY = player.position[1] + player.eyeHeight;
+                    currentCamZ = player.position[2];
                     
                     // 从yaw(水平)和pitch(垂直)角度计算前向量 | Calculate forward vector from yaw and pitch angles
                     currentForward = [
-                       Math.cos(firstPersonCamera.pitch) * Math.cos(firstPersonCamera.yaw),
-                       Math.sin(firstPersonCamera.pitch),
-                       Math.cos(firstPersonCamera.pitch) * Math.sin(firstPersonCamera.yaw)
+                       Math.cos(player.pitch) * Math.cos(player.yaw),
+                       Math.sin(player.pitch),
+                       Math.cos(player.pitch) * Math.sin(player.yaw)
                     ];
                     
                     // 计算右向量(直接从yaw角度计算) | Calculate right vector (directly from yaw angle)
                     currentRight = [
-                       Math.sin(firstPersonCamera.yaw),
+                       Math.sin(player.yaw),
                        0,
-                       -Math.cos(firstPersonCamera.yaw)
+                       -Math.cos(player.yaw)
                     ];
                     
                     // 计算上向量(叉乘) | Calculate up vector (cross product)
