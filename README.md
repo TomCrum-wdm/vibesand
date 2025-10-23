@@ -91,6 +91,7 @@ VibeSand implements **two distinct camera modes**:
   - Space: Jump (upward movement)
   - Mouse: Look around (pointer lock API)
   - Left-click: Use tool at crosshair
+  - **Auto-Jump**: Automatically jumps when encountering 1-block obstacles while moving forward
 - **Camera State**:
   ```javascript
   firstPersonCamera = {
@@ -126,6 +127,7 @@ VibeSand implements **two distinct camera modes**:
     - GPU-tracked with async CPU readback (1-frame latency)
     - Automatically respawns if destroyed or falls off world
     - True FPS game behavior: camera follows physics-simulated player
+    - **Smart auto-jump**: Automatically jumps over 1-block obstacles when moving forward
 
 **Camera Shared Systems:**
 - Both modes calculate `currentRight`, `currentUp`, `currentForward` vectors
@@ -329,14 +331,39 @@ if (target_type == VOXEL_TYPE_AIR || target_type == VOXEL_TYPE_WATER) {
 }
 ```
 
-**3. 物理集成 | Physics Integration** (GPU)
+**3. 自动跳跃系统 | Auto-Jump System** (GPU Shader)
+```wgsl
+// GPU检测前方障碍物 | GPU detects obstacles ahead
+fn shouldAutoJump(player_pos, horizontal_move) -> bool:
+    // 1. 计算前方位置 | Calculate position ahead
+    forward_dir = normalize(horizontal_move)
+    ahead_pos = player_pos + forward_dir
+    
+    // 2. 检查三个关键位置 | Check three key positions
+    has_ground = (voxel_below_player is solid)
+    has_obstacle = (voxel_ahead is solid)
+    has_clearance = (voxel_above_obstacle is air/water)
+    
+    // 3. 自动跳跃条件 | Auto-jump conditions
+    return has_ground && has_obstacle && has_clearance
+```
+**工作原理 | How it works:**
+- 在玩家管理着色器中运行，每帧检测 | Runs in player management shader, checks every frame
+- 只在有水平移动时激活 | Only activates when there's horizontal movement
+- 检测前方1格是否有石头/沙子 | Detects if there's stone/sand 1 block ahead
+- 确认玩家站在地面上 | Confirms player is standing on ground
+- 确认障碍物上方有空间 | Confirms there's space above obstacle
+- 自动设置跳跃速度 (0.15) | Automatically sets jump velocity (0.15)
+- 不会覆盖手动跳跃 (Space键) | Doesn't override manual jump (Space key)
+
+**4. 物理集成 | Physics Integration** (GPU)
 - 玩家体素使用与沙子相同的物理规则 | Player voxels use same physics as sand
 - 无支撑时向下坠落(重力) | Fall downward when unsupported (gravity)
 - 落入水中时与水交换 | Swap with water when falling into it
 - 沿斜坡对角滑动 | Slide diagonally down slopes
 - y=0处受保护不被删除 | Protected from deletion at y=0
 
-**4. 位置追踪 | Position Tracking** (GPU ↔ CPU)
+**5. 位置追踪 | Position Tracking** (GPU ↔ CPU)
 ```javascript
 // GPU写入 playerPosBuffer (4 × u32 | 4 × unsigned 32-bit integers):
 [x, y, z, found_flag]  // 所有操作都是原子的 | All atomic operations
@@ -352,7 +379,7 @@ playerPosReadBuffer.mapAsync(GPUMapMode.READ)
 // 1帧延迟在60 FPS下难以察觉 | 1-frame latency imperceptible at 60 FPS
 ```
 
-**5. 生成/重生逻辑 | Spawn/Respawn Logic**
+**6. 生成/重生逻辑 | Spawn/Respawn Logic**
 ```wgsl
 // 如果未找到玩家体素 | If player voxel not found:
 if (last_found != 1u || getVoxelType(...) != VOXEL_TYPE_PLAYER) {
@@ -391,7 +418,7 @@ const PLAYER_EYE_HEIGHT = 1.6;    // 眼睛位置距离脚底
 
 // 移动参数 | Movement parameters
 firstPersonCamera.speed = 20.0;         // 水平移动速度 (体素/秒)
-firstPersonCamera.jumpVelocity = 8.0;   // 跳跃力度 (体素/秒)
+firstPersonCamera.jumpVelocity = 18.0;  // 跳跃力度 (体素/秒) - 增加以克服重力
 ```
 
 **为什么采用这种设计? | Why This Design?**
@@ -411,11 +438,15 @@ firstPersonCamera.jumpVelocity = 8.0;   // 跳跃力度 (体素/秒)
    - Cause: `playerPosBuffer` not initialized, GPU reads garbage data
    - Fix: Initialize to 0 with `writeBuffer` immediately after buffer creation
 
-2. **跳跃太弱 | Jump Too Weak**:
-   - 原因: 早期版本将跳跃向量与水平移动一起归一化
-   - 解决: 将垂直移动(跳跃)与水平移动分开计算
-   - Cause: Early version normalized jump vector with horizontal movement
-   - Fix: Calculate vertical (jump) and horizontal movement separately
+2. **跳跃太弱或无法跳跃 | Jump Too Weak or Cannot Jump**:
+   - 原因1: 早期版本将跳跃向量与水平移动一起归一化
+   - 解决1: 将垂直移动(跳跃)与水平移动分开计算
+   - 原因2: 跳跃速度不足以克服重力
+   - 解决2: 增加jumpVelocity从8.0到18.0
+   - Cause 1: Early version normalized jump vector with horizontal movement
+   - Fix 1: Calculate vertical (jump) and horizontal movement separately
+   - Cause 2: Jump velocity insufficient to overcome gravity
+   - Fix 2: Increase jumpVelocity from 8.0 to 18.0
 
 3. **相机不跟随玩家 | Camera Not Following Player**:
    - 原因: `playerVoxelFound`为false或异步回读失败
