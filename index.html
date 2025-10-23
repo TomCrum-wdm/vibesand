@@ -2059,6 +2059,10 @@
                  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
              });
              
+             // Flag to track if a map operation is pending on playerPosReadBuffer
+             // 标志位：追踪玩家位置缓冲区是否有待处理的映射操作
+             let playerPosMapPending = false;
+             
              // 💡 光源统一缓冲区 | Lights uniform buffer
              // 存储所有动态点光源的数据 | Stores data for all dynamic point lights
              const lightsUniformBuffer = device.createBuffer({ 
@@ -2746,27 +2750,34 @@
                  
                  // 🧍 第一人称模式：读取玩家位置并绑定相机 | First-person mode: Read player position and bind camera
                  if (cameraMode === 'firstperson') {
-                     // Read player position asynchronously (will be applied next frame)
-                     playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
-                         const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
-                         const playerX = data[0];
-                         const playerY = data[1];
-                         const playerZ = data[2];
-                         const found = data[3];
-                         
-                         // If player voxel was found, bind camera to it
-                         if (found === 1) {
-                             // Update camera position to player voxel position + eye height offset
-                             firstPersonCamera.position[0] = playerX + 0.5; // Center of voxel
-                             firstPersonCamera.position[1] = playerY + PLAYER_EYE_HEIGHT; // Eye height above voxel
-                             firstPersonCamera.position[2] = playerZ + 0.5; // Center of voxel
-                         }
-                         
-                         playerPosReadBuffer.unmap();
-                     }).catch(err => {
-                         // Silently handle mapping errors (can happen if buffer is busy)
-                         console.warn("Player position readback skipped:", err);
-                     });
+                     // Only start a new map operation if one is not already pending
+                     // 只有在没有待处理的映射操作时才启动新的映射
+                     if (!playerPosMapPending) {
+                         playerPosMapPending = true;
+                         // Read player position asynchronously (will be applied next frame)
+                         playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                             const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
+                             const playerX = data[0];
+                             const playerY = data[1];
+                             const playerZ = data[2];
+                             const found = data[3];
+                             
+                             // If player voxel was found, bind camera to it
+                             if (found === 1) {
+                                 // Update camera position to player voxel position + eye height offset
+                                 firstPersonCamera.position[0] = playerX + 0.5; // Center of voxel
+                                 firstPersonCamera.position[1] = playerY + PLAYER_EYE_HEIGHT; // Eye height above voxel
+                                 firstPersonCamera.position[2] = playerZ + 0.5; // Center of voxel
+                             }
+                             
+                             playerPosReadBuffer.unmap();
+                             playerPosMapPending = false; // Map operation complete
+                         }).catch(err => {
+                             // Silently handle mapping errors (can happen if buffer is busy)
+                             console.warn("Player position readback skipped:", err);
+                             playerPosMapPending = false; // Reset flag on error
+                         });
+                     }
                  }
 
                  // 📊 更新FPS显示 | Update FPS display
