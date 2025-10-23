@@ -1667,13 +1667,9 @@
                 
                 @compute @workgroup_size(1, 1, 1)
                 fn main() {
-                    // Get desired camera position from uniforms
+                    // Get desired movement from uniforms (stored in camera_target_pos for convenience)
+                    let move_intent = tool_info.camera_target_pos;
                     let camera_pos = tool_info.camera_position;
-                    let target_pos = vec3<u32>(
-                        clamp(u32(floor(camera_pos.x)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.y)), 0u, GRID_DIM - 1u),
-                        clamp(u32(floor(camera_pos.z)), 0u, GRID_DIM - 1u)
-                    );
                     
                     // Check if player voxel already exists at last known position
                     let last_found = atomicLoad(&player_pos_output[3]);
@@ -1687,8 +1683,43 @@
                         if (last_idx != 0xFFFFFFFFu) {
                             let voxel_data = atomicLoad(&voxels[last_idx].data);
                             if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
-                                // Player voxel still exists and is falling with physics
-                                // Just clear found flag for next frame's search
+                                // Player voxel exists! Apply movement intent
+                                // Calculate target position based on current position + movement
+                                let current_pos_f = vec3<f32>(last_pos) + vec3<f32>(0.5); // Center of voxel
+                                let new_pos_f = current_pos_f + move_intent;
+                                let new_pos = vec3<u32>(
+                                    clamp(u32(floor(new_pos_f.x)), 0u, GRID_DIM - 1u),
+                                    clamp(u32(floor(new_pos_f.y)), 0u, GRID_DIM - 1u),
+                                    clamp(u32(floor(new_pos_f.z)), 0u, GRID_DIM - 1u)
+                                );
+                                
+                                // Only move if target position is different and is air or water
+                                if (any(new_pos != last_pos)) {
+                                    let new_idx = pos_to_idx(new_pos);
+                                    if (new_idx != 0xFFFFFFFFu) {
+                                        let target_voxel_data = atomicLoad(&voxels[new_idx].data);
+                                        let target_type = getVoxelType(target_voxel_data);
+                                        
+                                        // Allow movement into air or water (swap with water)
+                                        if (target_type == VOXEL_TYPE_AIR || target_type == VOXEL_TYPE_WATER) {
+                                            // Get player voxel data (to preserve lighting)
+                                            let player_voxel = unpackVoxel(voxel_data);
+                                            
+                                            // Atomic swap: move player to new position, place target in old position
+                                            atomicStore(&voxels[new_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, player_voxel.light));
+                                            atomicStore(&voxels[last_idx].data, target_voxel_data);
+                                            
+                                            // Update position tracking
+                                            atomicStore(&player_pos_output[0], new_pos.x);
+                                            atomicStore(&player_pos_output[1], new_pos.y);
+                                            atomicStore(&player_pos_output[2], new_pos.z);
+                                            atomicStore(&player_pos_output[3], 0u);
+                                            return;
+                                        }
+                                    }
+                                }
+                                
+                                // Couldn't move (blocked by solid), just clear found flag
                                 atomicStore(&player_pos_output[3], 0u);
                                 return;
                             }
@@ -1696,16 +1727,21 @@
                     }
                     
                     // Player voxel doesn't exist (fell off or was destroyed), create new one at camera position
-                    let target_idx = pos_to_idx(target_pos);
-                    if (target_idx != 0xFFFFFFFFu) {
+                    let spawn_pos = vec3<u32>(
+                        clamp(u32(floor(camera_pos.x)), 0u, GRID_DIM - 1u),
+                        clamp(u32(floor(camera_pos.y)), 0u, GRID_DIM - 1u),
+                        clamp(u32(floor(camera_pos.z)), 0u, GRID_DIM - 1u)
+                    );
+                    let spawn_idx = pos_to_idx(spawn_pos);
+                    if (spawn_idx != 0xFFFFFFFFu) {
                         // Always try to place player voxel, even if occupied (will replace)
                         // This ensures player is always visible near camera
-                        atomicStore(&voxels[target_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
+                        atomicStore(&voxels[spawn_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
                         
                         // Update player position output with found flag cleared for next search
-                        atomicStore(&player_pos_output[0], target_pos.x);
-                        atomicStore(&player_pos_output[1], target_pos.y);
-                        atomicStore(&player_pos_output[2], target_pos.z);
+                        atomicStore(&player_pos_output[0], spawn_pos.x);
+                        atomicStore(&player_pos_output[1], spawn_pos.y);
+                        atomicStore(&player_pos_output[2], spawn_pos.z);
                         atomicStore(&player_pos_output[3], 0u);
                     }
                 }
@@ -2062,6 +2098,15 @@
              // Flag to track if a map operation is pending on playerPosReadBuffer
              // 标志位：追踪玩家位置缓冲区是否有待处理的映射操作
              let playerPosMapPending = false;
+             
+             // 🎮 玩家体素位置跟踪 | Player voxel position tracking
+             // 从GPU读回的实际玩家位置 | Actual player position read back from GPU
+             let playerVoxelPosition = [64, 35, 64];  // 初始位置 | Initial position
+             let playerVoxelFound = false;  // 是否找到玩家体素 | Whether player voxel was found
+             
+             // 🎮 玩家移动意图 | Player movement intent
+             // 存储玩家想要移动的方向（由WASD控制）| Store the direction player wants to move (controlled by WASD)
+             let playerMoveIntent = [0, 0, 0];  // x, y, z movement intent
              
              // 💡 光源统一缓冲区 | Lights uniform buffer
              // 存储所有动态点光源的数据 | Stores data for all dynamic point lights
@@ -2498,13 +2543,14 @@
              }
              resizeCanvasAndContext();
 
-            // 🎮 Update first-person camera with keyboard controls
-            // 更新第一人称相机，支持键盘控制 | Update first-person camera with keyboard controls
-            // 相机独立移动（noclip），玩家体素跟随相机位置生成 | Camera moves independently (noclip), player voxel spawns at camera position
+            // 🎮 Update first-person camera and player movement
+            // 更新第一人称相机和玩家移动 | Update first-person camera and player movement
+            // 相机绑定到玩家体素位置，键盘控制玩家体素移动 | Camera binds to player voxel position, keyboard controls player voxel movement
             function updateFirstPersonCamera(deltaTime) {
                 if (cameraMode !== 'firstperson') return;
                 
-                // Calculate movement direction based on keyboard input
+                // 🎯 步骤1: 计算移动意图 | Step 1: Calculate movement intent
+                // 这会在GPU上应用到玩家体素 | This will be applied to player voxel on GPU
                 let moveDir = [0, 0, 0];
                 
                 // WASD movement in camera's local space
@@ -2525,7 +2571,7 @@
                     moveDir[2] -= Math.cos(firstPersonCamera.yaw);
                 }
                 
-                // Space for upward movement
+                // Space for jump/upward movement
                 if (keyState.space) {
                     moveDir[1] += 1.0;
                 }
@@ -2536,16 +2582,21 @@
                     moveDir[0] /= moveMagnitude;
                     moveDir[1] /= moveMagnitude;
                     moveDir[2] /= moveMagnitude;
-                    
-                    // Apply movement with speed and deltaTime
-                    firstPersonCamera.position[0] += moveDir[0] * firstPersonCamera.speed * deltaTime;
-                    firstPersonCamera.position[1] += moveDir[1] * firstPersonCamera.speed * deltaTime;
-                    firstPersonCamera.position[2] += moveDir[2] * firstPersonCamera.speed * deltaTime;
-                    
-                    // Keep camera within world bounds
-                    firstPersonCamera.position[0] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 1, firstPersonCamera.position[0]));
-                    firstPersonCamera.position[1] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 1, firstPersonCamera.position[1]));
-                    firstPersonCamera.position[2] = Math.max(1, Math.min(VOXEL_GRID_SIZE - 1, firstPersonCamera.position[2]));
+                }
+                
+                // 存储移动意图（将在GPU上应用）| Store movement intent (will be applied on GPU)
+                playerMoveIntent[0] = moveDir[0] * firstPersonCamera.speed * deltaTime;
+                playerMoveIntent[1] = moveDir[1] * firstPersonCamera.speed * deltaTime;
+                playerMoveIntent[2] = moveDir[2] * firstPersonCamera.speed * deltaTime;
+                
+                // 🎯 步骤2: 更新相机位置跟随玩家体素 | Step 2: Update camera position to follow player voxel
+                // 使用从GPU读回的玩家体素位置 | Use player voxel position read back from GPU
+                if (playerVoxelFound) {
+                    // 相机位置 = 玩家体素位置 + 眼睛高度偏移 | Camera position = player voxel position + eye height offset
+                    // 玩家体素在脚底，相机在眼睛高度 | Player voxel at feet, camera at eye height
+                    firstPersonCamera.position[0] = playerVoxelPosition[0] + 0.5;  // 体素中心 | Voxel center
+                    firstPersonCamera.position[1] = playerVoxelPosition[1] + PLAYER_EYE_HEIGHT;  // 眼睛高度 | Eye height
+                    firstPersonCamera.position[2] = playerVoxelPosition[2] + 0.5;  // 体素中心 | Voxel center
                 }
             }
 
@@ -2676,7 +2727,12 @@
                  computeUBO.set([2.0], 3); 
                  computeUBO.set(currentRight, 4); 
                  computeUBO.set(currentUp, 8);
-                 computeUBO.set(cameraTarget, 12);
+                 // 在第一人称模式下，传递玩家移动意图；否则传递相机目标 | In first-person mode, pass player movement intent; otherwise pass camera target
+                 if (cameraMode === 'firstperson') {
+                     computeUBO.set(playerMoveIntent, 12);  // 玩家移动意图 | Player movement intent
+                 } else {
+                     computeUBO.set(cameraTarget, 12);
+                 }
                  // 在第一人称模式下，始终瞄准屏幕中心 | In first-person mode, always aim at screen center
                  const mx = cameraMode === 'firstperson' ? canvas.width / 2 : mouseState.x * (canvas.width / canvas.clientWidth);
                  const my = cameraMode === 'firstperson' ? canvas.height / 2 : mouseState.y * (canvas.height / canvas.clientHeight);
@@ -2790,9 +2846,39 @@
                  // 🚀 提交所有命令到GPU执行 | Submit all commands to GPU for execution
                  device.queue.submit([commandEncoder.finish()]);
                  
-                 // Note: First-person camera now uses keyboard movement (noclip)
-                 // Player voxel still exists as a visual indicator but doesn't control camera position
-                 // The playerPosReadBuffer mapAsync code has been removed to eliminate buffer mapping errors
+                 // 🎮 读回玩家体素位置（仅第一人称模式）| Read back player voxel position (first-person mode only)
+                 if (cameraMode === 'firstperson' && !playerPosMapPending) {
+                     // 设置映射标志，防止重复映射 | Set mapping flag to prevent duplicate mapping
+                     playerPosMapPending = true;
+                     
+                     // 异步读取玩家位置 | Asynchronously read player position
+                     playerPosReadBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                         const data = new Uint32Array(playerPosReadBuffer.getMappedRange());
+                         
+                         // 读取玩家位置和found标志 | Read player position and found flag
+                         const x = data[0];
+                         const y = data[1];
+                         const z = data[2];
+                         const found = data[3];
+                         
+                         // 更新玩家体素位置 | Update player voxel position
+                         if (found === 1) {
+                             playerVoxelPosition[0] = x;
+                             playerVoxelPosition[1] = y;
+                             playerVoxelPosition[2] = z;
+                             playerVoxelFound = true;
+                         } else {
+                             playerVoxelFound = false;
+                         }
+                         
+                         // 取消映射 | Unmap buffer
+                         playerPosReadBuffer.unmap();
+                         playerPosMapPending = false;
+                     }).catch(error => {
+                         console.warn("Failed to read player position:", error);
+                         playerPosMapPending = false;
+                     });
+                 }
 
                  // 📊 更新FPS显示 | Update FPS display
                  document.getElementById('fps').textContent = (1000 / (now - lastFrameTime)).toFixed(1);
