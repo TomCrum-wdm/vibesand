@@ -1640,7 +1640,7 @@
             const findPlayerShaderCode = `
                 ${commonShaderCode}
                 @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
-                @group(0) @binding(1) var<storage, read_write> player_pos_output: vec4<u32>; // xyz position + found flag
+                @group(0) @binding(1) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>; // xyz position + found flag
                 
                 @compute @workgroup_size(4, 4, 4)
                 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -1650,10 +1650,10 @@
                         if (v_type == VOXEL_TYPE_PLAYER) {
                             // Found the player voxel, write its position atomically
                             // Only first thread to find player will write (race is acceptable)
-                            atomicStore(&player_pos_output.x, id.x);
-                            atomicStore(&player_pos_output.y, id.y);
-                            atomicStore(&player_pos_output.z, id.z);
-                            atomicStore(&player_pos_output.w, 1u);
+                            atomicStore(&player_pos_output[0], id.x);
+                            atomicStore(&player_pos_output[1], id.y);
+                            atomicStore(&player_pos_output[2], id.z);
+                            atomicStore(&player_pos_output[3], 1u);
                         }
                     }
                 }
@@ -1663,7 +1663,7 @@
                 ${commonShaderCode}
                 @group(0) @binding(0) var<storage, read_write> voxels: array<VoxelData>;
                 @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
-                @group(0) @binding(2) var<storage, read_write> player_pos_output: vec4<u32>;
+                @group(0) @binding(2) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>;
                 
                 @compute @workgroup_size(1, 1, 1)
                 fn main() {
@@ -1676,12 +1676,12 @@
                     );
                     
                     // Check if player voxel already exists at last known position
-                    let last_found = atomicLoad(&player_pos_output.w);
+                    let last_found = atomicLoad(&player_pos_output[3]);
                     if (last_found == 1u) {
                         let last_pos = vec3<u32>(
-                            atomicLoad(&player_pos_output.x),
-                            atomicLoad(&player_pos_output.y),
-                            atomicLoad(&player_pos_output.z)
+                            atomicLoad(&player_pos_output[0]),
+                            atomicLoad(&player_pos_output[1]),
+                            atomicLoad(&player_pos_output[2])
                         );
                         let last_idx = pos_to_idx(last_pos);
                         if (last_idx != 0xFFFFFFFFu) {
@@ -1689,7 +1689,7 @@
                             if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
                                 // Player voxel still exists and is falling with physics
                                 // Just clear found flag for next frame's search
-                                atomicStore(&player_pos_output.w, 0u);
+                                atomicStore(&player_pos_output[3], 0u);
                                 return;
                             }
                         }
@@ -1703,10 +1703,10 @@
                         atomicStore(&voxels[target_idx].data, packVoxel(VOXEL_TYPE_PLAYER, 0u, 0u, vec3(0.0)));
                         
                         // Update player position output with found flag cleared for next search
-                        atomicStore(&player_pos_output.x, target_pos.x);
-                        atomicStore(&player_pos_output.y, target_pos.y);
-                        atomicStore(&player_pos_output.z, target_pos.z);
-                        atomicStore(&player_pos_output.w, 0u);
+                        atomicStore(&player_pos_output[0], target_pos.x);
+                        atomicStore(&player_pos_output[1], target_pos.y);
+                        atomicStore(&player_pos_output[2], target_pos.z);
+                        atomicStore(&player_pos_output[3], 0u);
                     }
                 }
             `;
