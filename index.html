@@ -1181,7 +1181,7 @@
                 pitch: 0,
                 velocity: [0, 0, 0],
                 speed: 20.0,
-                jumpVelocity: 8.0,
+                jumpVelocity: 18.0,  // Increased from 8.0 to overcome gravity better and enable jumping
                 gravity: -20.0,
                 isGrounded: false,
                 height: 1.8,
@@ -1665,10 +1665,63 @@
                 @group(0) @binding(1) var<uniform> tool_info: ComputePassUniforms;
                 @group(0) @binding(2) var<storage, read_write> player_pos_output: array<atomic<u32>, 4>;
                 
+                // Check if there's a 1-block obstacle ahead of player that requires auto-jump
+                fn shouldAutoJump(player_pos: vec3<u32>, horizontal_move: vec2<f32>) -> bool {
+                    // Only check for auto-jump if there's horizontal movement
+                    let move_magnitude = length(horizontal_move);
+                    if (move_magnitude < 0.01) {
+                        return false;
+                    }
+                    
+                    // Normalize horizontal direction to get the forward direction
+                    let forward_dir = normalize(horizontal_move);
+                    
+                    // Check 1 block ahead in the movement direction
+                    let check_offset = vec3<i32>(
+                        i32(round(forward_dir.x)),
+                        0,
+                        i32(round(forward_dir.y))
+                    );
+                    
+                    let ahead_pos = vec3<i32>(player_pos) + check_offset;
+                    let above_ahead_pos = ahead_pos + vec3<i32>(0, 1, 0);
+                    let below_pos = vec3<i32>(player_pos) - vec3<i32>(0, 1, 0);
+                    
+                    // Check if positions are within bounds
+                    if (any(ahead_pos < vec3<i32>(0)) || any(ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
+                        any(above_ahead_pos < vec3<i32>(0)) || any(above_ahead_pos >= vec3<i32>(i32(GRID_DIM))) ||
+                        any(below_pos < vec3<i32>(0))) {
+                        return false;
+                    }
+                    
+                    let ahead_idx = pos_to_idx(vec3<u32>(ahead_pos));
+                    let above_ahead_idx = pos_to_idx(vec3<u32>(above_ahead_pos));
+                    let below_idx = pos_to_idx(vec3<u32>(below_pos));
+                    
+                    if (ahead_idx == 0xFFFFFFFFu || above_ahead_idx == 0xFFFFFFFFu || below_idx == 0xFFFFFFFFu) {
+                        return false;
+                    }
+                    
+                    // Get voxel types
+                    let ahead_type = getVoxelType(atomicLoad(&voxels[ahead_idx].data));
+                    let above_ahead_type = getVoxelType(atomicLoad(&voxels[above_ahead_idx].data));
+                    let below_type = getVoxelType(atomicLoad(&voxels[below_idx].data));
+                    
+                    // Auto-jump conditions:
+                    // 1. There's solid ground below player (standing on something)
+                    // 2. There's a solid block ahead (obstacle)
+                    // 3. There's air above the obstacle (can jump over it)
+                    let has_ground = (below_type == VOXEL_TYPE_STONE || below_type == VOXEL_TYPE_SAND);
+                    let has_obstacle = (ahead_type == VOXEL_TYPE_STONE || ahead_type == VOXEL_TYPE_SAND);
+                    let has_space_above = (above_ahead_type == VOXEL_TYPE_AIR || above_ahead_type == VOXEL_TYPE_WATER);
+                    
+                    return has_ground && has_obstacle && has_space_above;
+                }
+                
                 @compute @workgroup_size(1, 1, 1)
                 fn main() {
                     // Get desired movement from uniforms (stored in camera_target_pos for convenience)
-                    let move_intent = tool_info.camera_target_pos;
+                    var move_intent = tool_info.camera_target_pos;
                     let camera_pos = tool_info.camera_position;
                     
                     // Check if player voxel already exists at last known position
@@ -1683,6 +1736,15 @@
                         if (last_idx != 0xFFFFFFFFu) {
                             let voxel_data = atomicLoad(&voxels[last_idx].data);
                             if (getVoxelType(voxel_data) == VOXEL_TYPE_PLAYER) {
+                                // Check for auto-jump (only if not already jumping upward)
+                                if (move_intent.y <= 0.0) {
+                                    let horizontal_move = vec2<f32>(move_intent.x, move_intent.z);
+                                    if (shouldAutoJump(last_pos, horizontal_move)) {
+                                        // Auto-jump! Add upward movement
+                                        move_intent.y = 0.15;  // Auto-jump velocity (slightly less than manual jump)
+                                    }
+                                }
+                                
                                 // Player voxel exists! Apply movement intent
                                 // Calculate target position based on current position + movement
                                 let current_pos_f = vec3<f32>(last_pos) + vec3<f32>(0.5); // Center of voxel
